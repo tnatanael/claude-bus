@@ -13,6 +13,14 @@
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/bus-hook.sh free" }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/bus-beat.sh" }
+        ]
+      }
     ]
   }
 }
