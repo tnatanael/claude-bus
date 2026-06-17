@@ -3,7 +3,7 @@
 # Par Unix do bus-monitor.ps1: polling do inbox, valida token, espera 'free' antes de
 # entregar, carimba heartbeat e garante singleton (kill best-effort + lock-PID).
 set -u
-me=""; poll=2; yield=1800
+me=""; poll=2; yield=1800; bus_version="0.4.1"
 bus_root="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -34,6 +34,7 @@ statefile=""; [ -n "$sid" ] && statefile="$state/$sid.state"
 # Singleton (2/2) cooperativo por lock-PID: gravo meu PID como dono. No loop, se o
 # .owner nao for mais o meu PID, outro monitor assumiu e eu saio.
 printf '%s' "$$" > "$owner"
+printf '%s' "$bus_version" > "$presence/$me.ver"   # versao do monitor (dashboard)
 
 deadline=$(( $(date +%s) + yield ))
 

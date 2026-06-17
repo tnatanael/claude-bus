@@ -6,7 +6,7 @@
       "name": "bus",
       "source": "./",
       "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code: wake autonomo, presenca (bus-who), auth por token e auto-nome por sessao. Cross-platform (Windows PowerShell / macOS + Linux bash).",
-      "version": "0.4.0"
+      "version": "0.4.1"
     }
   ]
 }

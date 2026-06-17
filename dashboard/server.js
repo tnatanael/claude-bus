@@ -105,9 +105,12 @@ function readSessions(now) {
     }
     const sessionId = slugToSessionId[slug];
     const state = (sessionId && stateMap[sessionId]) ? stateMap[sessionId] : 'unknown';
+    // presence/<slug>.ver : version stamped by the monitor on startup (v0.4.1+).
+    const version = (safeReadText(path.join(presenceDir, slug + '.ver')) || '').trim() || null;
     sessions.push({
       slug,
       state,
+      version,
       alive: lastBeatAgeSec <= ALIVE_MAX_AGE_SEC,
       lastBeatAgeSec,
     });

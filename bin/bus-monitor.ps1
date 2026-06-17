@@ -11,6 +11,8 @@ param(
   [int]$YieldSeconds = 1800
 )
 
+$BusVersion = '0.4.1'
+
 # Forca UTF-8 no stdout: sem isso o PS 5.1 corrompe acentos do corpo na captura do harness.
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
@@ -54,6 +56,8 @@ $statefile = if ($sid) { Join-Path $state ($sid + '.state') } else { '' }
 # loop, se o .owner nao for mais o meu PID, outro monitor assumiu e eu saio (exit).
 # Pega duplicados/zumbis que o kill acima nao alcancou -- sem precisar matar ninguem.
 [System.IO.File]::WriteAllText($owner, [string]$PID, (New-Object System.Text.UTF8Encoding($false)))
+# Carimba a versao do monitor pra a dashboard mostrar quem esta em qual versao.
+[System.IO.File]::WriteAllText((Join-Path $presence ($Me + '.ver')), $BusVersion, (New-Object System.Text.UTF8Encoding($false)))
 
 $secret   = Get-BusSecret $BusRoot
 $prefix   = 'to-' + $Me + '__'

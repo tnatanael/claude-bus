@@ -153,6 +153,17 @@
     text-overflow: ellipsis;
   }
   .session .beat { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .session .ver {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(110,118,129,0.12);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 7px;
+  }
+  .session .ver.unknown { opacity: 0.55; font-style: italic; }
   .badge {
     flex: none;
     font-size: 11px;
@@ -378,11 +389,11 @@ function mockState() {
     now,
     busRoot: "/tmp/claude-bus (MOCK)",
     sessions: [
-      { slug: "bus-demo-arquitect",    state: "free",    alive: true,  lastBeatAgeSec: 2 },
-      { slug: "bus-demo-po",           state: "busy",    alive: true,  lastBeatAgeSec: 1 },
-      { slug: "bus-demo-dev-backend",  state: "busy",    alive: true,  lastBeatAgeSec: 4 },
-      { slug: "bus-demo-dev-frontend", state: "busy",    alive: true,  lastBeatAgeSec: 0 },
-      { slug: "bus-demo-ghost",        state: "unknown", alive: false, lastBeatAgeSec: 300 }
+      { slug: "bus-demo-arquitect",    state: "free",    alive: true,  lastBeatAgeSec: 2,   version: "0.4.1" },
+      { slug: "bus-demo-po",           state: "busy",    alive: true,  lastBeatAgeSec: 1,   version: "0.4.1" },
+      { slug: "bus-demo-dev-backend",  state: "busy",    alive: true,  lastBeatAgeSec: 4,   version: "0.4.1" },
+      { slug: "bus-demo-dev-frontend", state: "busy",    alive: true,  lastBeatAgeSec: 0,   version: "0.4.0" },
+      { slug: "bus-demo-ghost",        state: "unknown", alive: false, lastBeatAgeSec: 300, version: null }
     ],
     handoffs: {
       inbox: [
@@ -456,6 +467,10 @@ function renderSessions(sessions) {
     const dotTitle = s.alive ? "alive: heartbeat fresh (monitor or recent activity)" : "no recent heartbeat";
     const badgeTitle = s.alive ? ("session state: " + esc(stateCls))
       : ("offline: no heartbeat (monitor stopped, no recent activity); last state on disk was " + esc(stateCls));
+    const ver = s.version ? ("v" + s.version) : "—";
+    const verCls = s.version ? "" : "unknown";
+    const verTitle = s.version ? ("monitor version " + esc(s.version))
+      : "monitor version unknown (predates v0.4.1, which started stamping it)";
     return `
       <div class="session">
         <div class="alive-dot ${aliveCls}" title="${dotTitle}"></div>
@@ -463,6 +478,7 @@ function renderSessions(sessions) {
           <div class="slug">${esc(s.slug)}</div>
           <div class="beat">last beat ${esc(fmtAge(s.lastBeatAgeSec))}</div>
         </div>
+        <div class="ver ${verCls}" title="${verTitle}">${esc(ver)}</div>
         <div class="badge ${badge}" title="${badgeTitle}">${esc(badge)}</div>
       </div>`;
   }).join("");
