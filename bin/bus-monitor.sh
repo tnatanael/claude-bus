@@ -31,11 +31,14 @@ beat="$presence/$me.alive"
 sid="${CLAUDE_CODE_SESSION_ID:-}"
 statefile=""; [ -n "$sid" ] && statefile="$state/$sid.state"
 
-secret=""; [ -f "$bus_root/.bus-secret" ] && secret="$(tr -d ' \r\n' < "$bus_root/.bus-secret")"
 deadline=$(( $(date +%s) + yield ))
 
 while true; do
   touch "$beat"   # heartbeat de presenca
+  # re-le o segredo a cada iteracao: cobre o monitor que sobe ANTES de qualquer
+  # .bus-secret existir (1a sessao). Lido so 1x no startup, ficaria com secret=""
+  # e rejeitaria o 1o handoff. O segredo nunca muda (mv -n), entao reler e seguro.
+  secret=""; [ -f "$bus_root/.bus-secret" ] && secret="$(tr -d ' \r\n' < "$bus_root/.bus-secret")"
   hit="$(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null | head -n1)"
   if [ -n "$hit" ] && [ -e "$hit" ]; then
     raw="$(cat "$hit" 2>/dev/null)"

@@ -24,3 +24,4 @@ for f in "$pres"/*.alive; do
   printf '%-18s %-16s (ultimo beat: %ss atras)\n' "$slug" "$st" "$age"
 done
 [ "$found" -eq 0 ] && echo "Nenhuma presenca registrada."
+exit 0   # nao herdar o status 1 do teste acima quando ha presencas
