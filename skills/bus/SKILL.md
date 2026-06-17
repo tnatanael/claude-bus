@@ -50,6 +50,12 @@ Escreva o corpo num arquivo temp com a ferramenta **Write** (evita problema de a
 ## 5. Endereçamento
 Arquivo: `to-<destino>__from-<origem>__<id>.handoff`. Seu monitor captura tudo `to-<você>__*` — handoffs novos **e** retornos (correlacione pelo campo `in_reply_to`). Use slugs consistentes entre as sessões.
 
+## Modelo de coordenação
+- **Quem origina, coordena.** Ao disparar um handoff (abrir uma frente de trabalho), VOCÊ é o coordenador dela: acompanhe o progresso, cobre os retornos que pediu, integre os resultados e dê a frente por encerrada. Não terceirize a condução da sua própria frente.
+- **Comunicação peer-to-peer, direta.** Especialistas falam direto entre si. Precisa de algo de outro especialista pra tocar a SUA frente? Mande o handoff direto a ele; ao receber um, responda direto a quem pediu. Sem "maestro" central no meio.
+- **Não assuma frente alheia.** Numa frente que outro originou e que não é endereçada a você, no máximo observe/valide e informe o operador — não assuma a coordenação dela.
+- **Conflitos sobem pro operador.** Impasse ou conflito de contrato que os especialistas não fecham entre si: não decida sozinho nem trave — escale pro operador (humano) decidir.
+
 ## Notas / limitações
 - Sessões precisam estar **abertas** (o monitor morre se a aba fechar; religue com `/bus`).
 - Handoff sem token válido vai pra `rejected/` e não acorda ninguém.

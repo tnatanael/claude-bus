@@ -1,6 +1,6 @@
 {
   "name": "bus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code via um BUS de arquivos: wake autonomo, presenca (bus-who), auth por token e auto-nome por sessao. Cross-platform (Windows PowerShell / macOS + Linux bash).",
   "author": { "name": "tnatanael" },
   "homepage": "https://github.com/tnatanael/claude-bus",
