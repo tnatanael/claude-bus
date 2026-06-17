@@ -12,7 +12,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 
 ```
 /plugin marketplace add tnatanael/claude-bus
-/plugin install bus
+/plugin install bus@claude-bus
 ```
 
 Os hooks (`UserPromptSubmit`/`Stop`) entram automaticamente com o plugin — sem editar `settings.json`.
