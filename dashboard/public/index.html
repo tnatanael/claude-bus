@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BUS Live Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #171d26;
+    --panel-2: #1d2530;
+    --border: #2a3441;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --green: #2ea043;
+    --amber: #d29922;
+    --grey: #6e7681;
+    --red: #f85149;
+    --blue: #388bfd;
+    --accent: #58a6ff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    letter-spacing: 0.3px;
+  }
+  header h1 .dot {
+    color: var(--accent);
+  }
+  .meta {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+    flex-wrap: wrap;
+  }
+  .meta b { color: var(--text); font-weight: 600; }
+  .src {
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  .src.live { background: rgba(46,160,67,0.15); color: var(--green); border: 1px solid rgba(46,160,67,0.4); }
+  .src.mock { background: rgba(210,153,34,0.15); color: var(--amber); border: 1px solid rgba(210,153,34,0.4); }
+  .src.down { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.4); }
+  .pulse {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .pulse.on { animation: blink 1.5s ease-in-out infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+  main {
+    padding: 20px;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  section { min-width: 0; }
+  .section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin: 0 0 10px 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title .count {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    color: var(--text);
+  }
+  .section-title .hint {
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 11px;
+    color: var(--grey);
+    font-family: var(--mono);
+  }
+
+  /* Presence cards */
+  .session {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .alive-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--grey);
+  }
+  .alive-dot.alive { background: var(--green); animation: alivePulse 2s ease-out infinite; }
+  .alive-dot.dead { background: var(--grey); }
+  @keyframes alivePulse {
+    0% { box-shadow: 0 0 0 0 rgba(46,160,67,0.5); }
+    70% { box-shadow: 0 0 0 6px rgba(46,160,67,0); }
+    100% { box-shadow: 0 0 0 0 rgba(46,160,67,0); }
+  }
+  .session .info { min-width: 0; flex: 1; }
+  .session .slug {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session .beat { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .badge {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 3px 9px;
+    border-radius: 6px;
+  }
+  .badge.busy { background: rgba(210,153,34,0.16); color: var(--amber); border: 1px solid rgba(210,153,34,0.45); }
+  .badge.free { background: rgba(46,160,67,0.16); color: var(--green); border: 1px solid rgba(46,160,67,0.45); }
+  .badge.unknown { background: rgba(110,118,129,0.16); color: var(--grey); border: 1px solid rgba(110,118,129,0.45); }
+  .badge.offline { background: rgba(110,118,129,0.10); color: var(--grey); border: 1px dashed rgba(110,118,129,0.55); }
+
+  /* Handoff flow : the flowArea is the positioning context for the connector overlay */
+  #flowArea { position: relative; }
+  #connectors {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    pointer-events: none;
+    overflow: visible;
+    z-index: 5;
+  }
+  .conn {
+    fill: none;
+    stroke: rgba(88,166,255,0.42);
+    stroke-width: 1.8;
+    transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+    marker-end: url(#arrow);
+  }
+  .conn.hl { stroke: var(--accent); stroke-width: 2.6; marker-end: url(#arrowHl); }
+  .conn.dim { opacity: 0.12; }
+  .cnode { fill: rgba(88,166,255,0.55); transition: fill 0.15s ease, opacity 0.15s ease; }
+  .cnode.hl { fill: var(--accent); }
+  .cnode.dim { opacity: 0.12; }
+
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 700px) { .flow { grid-template-columns: 1fr; } }
+  .column {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    min-height: 80px;
+  }
+  .column h3 {
+    margin: 0 0 10px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .column h3 .arrow { color: var(--border); }
+  .column.inbox h3 { color: var(--blue); }
+  .column.processing h3 { color: var(--amber); }
+  .column.done h3 { color: var(--green); }
+
+  .handoff {
+    position: relative;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    border-radius: 7px;
+    padding: 9px 11px;
+    margin-bottom: 9px;
+    font-size: 12px;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+    z-index: 6;
+  }
+  .column.processing .handoff { border-left-color: var(--amber); }
+  .column.done .handoff { border-left-color: var(--green); }
+  .handoff.linkable { cursor: pointer; }
+  .handoff.hl {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(88,166,255,0.18);
+  }
+  .handoff.dim { opacity: 0.4; }
+  .handoff .route {
+    font-family: var(--mono);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .handoff .route .to { color: var(--accent); }
+  .handoff .route .ar { color: var(--muted); }
+  .handoff .id {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 4px;
+    word-break: break-all;
+  }
+  .handoff .tags { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag {
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .tag.reply { color: var(--amber); border-color: rgba(210,153,34,0.5); }
+  .tag.replyto { color: var(--accent); border-color: rgba(88,166,255,0.5); }
+  /* fallback styling when the parent is not currently on the board */
+  .tag.replyto.missing { color: var(--grey); border-color: var(--border); border-style: dashed; }
+  .empty { color: var(--grey); font-size: 12px; font-style: italic; padding: 6px 2px; }
+
+  .rejected-wrap { margin-top: 18px; }
+  .rejected-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(248,81,73,0.08);
+    border: 1px solid rgba(248,81,73,0.35);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .rejected-banner.clean { background: var(--panel); border-color: var(--border); }
+  .rej-count {
+    font-size: 22px;
+    font-weight: 800;
+    font-family: var(--mono);
+    color: var(--red);
+    min-width: 34px;
+    text-align: center;
+  }
+  .rejected-banner.clean .rej-count { color: var(--muted); }
+  .rej-label b { color: var(--text); }
+  .rej-label small { color: var(--muted); display: block; font-size: 11px; }
+  .rejected-list { margin-top: 10px; }
+  .rejected-list .handoff { border-left-color: var(--red); }
+
+  footer {
+    padding: 10px 20px 24px;
+    color: var(--grey);
+    font-size: 11px;
+    font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot">●</span> BUS Live Dashboard</h1>
+  <div class="meta">
+    <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
+    <span>bus root: <b id="busRoot">…</b></span>
+    <span>now: <b id="now">…</b></span>
+    <span class="src" id="src">…</span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="section-title">Presence <span class="count" id="sessCount">0</span></div>
+    <div id="sessions"></div>
+  </section>
+
+  <section>
+    <div class="section-title">Handoff Flow <span class="hint">hover a handoff to trace its reply link</span></div>
+    <div id="flowArea">
+      <svg id="connectors" aria-hidden="true">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="rgba(88,166,255,0.45)"></path>
+          </marker>
+          <marker id="arrowHl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"></path>
+          </marker>
+        </defs>
+      </svg>
+      <div class="flow">
+        <div class="column inbox">
+          <h3>Inbox <span class="arrow">▸</span></h3>
+          <div id="inbox"></div>
+        </div>
+        <div class="column processing">
+          <h3>Processing <span class="arrow">▸</span></h3>
+          <div id="processing"></div>
+        </div>
+        <div class="column done">
+          <h3>Done</h3>
+          <div id="done"></div>
+        </div>
+      </div>
+
+      <div class="rejected-wrap">
+        <div class="rejected-banner clean" id="rejBanner">
+          <div class="rej-count" id="rejCount">0</div>
+          <div class="rej-label">
+            <b>Rejected</b>
+            <small>handoffs that failed shared-secret auth (no valid token)</small>
+          </div>
+        </div>
+        <div class="rejected-list" id="rejected"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer id="foot">BUS Live Dashboard · read-only view of the claude-bus on disk · refresh every 1.5s · reply links drawn from inReplyTo</footer>
+
+<script>
+"use strict";
+
+const POLL_MS = 1500;
+const API = "/api/state";
+
+// ---- MOCK fallback (used only until the real backend answers) ----
+// Mirrors the authoritative schema in ARCHITECTURE.md so the UI is demonstrable
+// while bus-demo-dev-backend builds server.js. Auto-disabled on first live hit.
+function mockState() {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    now,
+    busRoot: "/tmp/claude-bus (MOCK)",
+    sessions: [
+      { slug: "bus-demo-arquitect",    state: "free",    alive: true,  lastBeatAgeSec: 2 },
+      { slug: "bus-demo-po",           state: "busy",    alive: true,  lastBeatAgeSec: 1 },
+      { slug: "bus-demo-dev-backend",  state: "busy",    alive: true,  lastBeatAgeSec: 4 },
+      { slug: "bus-demo-dev-frontend", state: "busy",    alive: true,  lastBeatAgeSec: 0 },
+      { slug: "bus-demo-ghost",        state: "unknown", alive: false, lastBeatAgeSec: 300 }
+    ],
+    handoffs: {
+      inbox: [
+        { id: "20260617-132906-f4db92", from: "bus-demo-po", to: "bus-demo-arquitect", replyRequired: false, inReplyTo: "20260617-132752-5bc55a" }
+      ],
+      processing: [
+        { id: "20260617-132901-aa1234", from: "bus-demo-po", to: "bus-demo-dev-backend", replyRequired: true, inReplyTo: "" }
+      ],
+      done: [
+        { id: "20260617-132752-5bc55a", from: "bus-demo-arquitect", to: "bus-demo-po", replyRequired: true, inReplyTo: "" },
+        { id: "20260617-132218-a02fcc", from: "bus-demo-dev-frontend", to: "bus-demo-arquitect", replyRequired: false, inReplyTo: "20260617-132133-d3da33" },
+        { id: "20260617-132133-d3da33", from: "bus-demo-arquitect", to: "bus-demo-dev-frontend", replyRequired: true, inReplyTo: "" }
+      ],
+      rejected: []
+    },
+    counts: { inbox: 1, processing: 1, done: 3, rejected: 0 }
+  };
+}
+
+let usedLiveOnce = false;
+let lastHandoffSig = null;   // re-render handoff DOM only when it actually changes
+let hoveredId = null;        // preserved across polls so hover survives a refresh
+
+function setSource(mode) {
+  const el = document.getElementById("src");
+  el.className = "src " + mode;
+  el.textContent = mode === "live" ? "LIVE" : (mode === "mock" ? "MOCK DATA" : "BACKEND DOWN");
+  document.getElementById("pulse").classList.toggle("on", mode !== "down");
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fmtAge(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  if (sec < 60) return sec + "s ago";
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return m + "m " + s + "s ago";
+  const h = Math.floor(m / 60);
+  return h + "h " + (m % 60) + "m ago";
+}
+
+function fmtClock(unixSec) {
+  if (!unixSec) return "…";
+  const d = new Date(unixSec * 1000);
+  const p = n => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function shortId(id) {
+  const parts = String(id).split("-");
+  return parts.length >= 3 ? parts.slice(1).join("-") : id;
+}
+
+function renderSessions(sessions) {
+  const wrap = document.getElementById("sessions");
+  document.getElementById("sessCount").textContent = sessions.length;
+  if (!sessions.length) { wrap.innerHTML = '<div class="empty">no sessions present</div>'; return; }
+  wrap.innerHTML = sessions.map(s => {
+    const state = (s.state || "unknown").toLowerCase();
+    const stateCls = ["busy", "free", "unknown"].includes(state) ? state : "unknown";
+    // `alive` (heartbeat fresh, <=120s) is kept up BOTH by the monitor (while idle)
+    // and by a PostToolUse hook (while the session is actively working but its
+    // monitor has exited), so it reliably means "in the BUS and/or working". When
+    // it goes stale the session is neither, so show OFFLINE rather than a frozen
+    // busy/free from a state file that stopped being updated.
+    const badge = s.alive ? stateCls : "offline";
+    const aliveCls = s.alive ? "alive" : "dead";
+    const dotTitle = s.alive ? "alive: heartbeat fresh (monitor or recent activity)" : "no recent heartbeat";
+    const badgeTitle = s.alive ? ("session state: " + esc(stateCls))
+      : ("offline: no heartbeat (monitor stopped, no recent activity); last state on disk was " + esc(stateCls));
+    return `
+      <div class="session">
+        <div class="alive-dot ${aliveCls}" title="${dotTitle}"></div>
+        <div class="info">
+          <div class="slug">${esc(s.slug)}</div>
+          <div class="beat">last beat ${esc(fmtAge(s.lastBeatAgeSec))}</div>
+        </div>
+        <div class="badge ${badge}" title="${badgeTitle}">${esc(badge)}</div>
+      </div>`;
+  }).join("");
+}
+
+// Set of every handoff id currently on the board, so we know which replies can be linked.
+function buildIdSet(h) {
+  const set = new Set();
+  ["inbox", "processing", "done", "rejected"].forEach(k =>
+    (h[k] || []).forEach(it => set.add(it.id)));
+  return set;
+}
+
+function handoffCard(it, idSet) {
+  const replyTag = it.replyRequired ? '<span class="tag reply">reply required</span>' : "";
+  const parentPresent = it.inReplyTo && idSet && idSet.has(it.inReplyTo);
+  let linkTag = "";
+  if (it.inReplyTo) {
+    linkTag = parentPresent
+      ? `<span class="tag replyto" title="reply to ${esc(it.inReplyTo)} — linked above">↩ in reply to ${esc(shortId(it.inReplyTo))}</span>`
+      : `<span class="tag replyto missing" title="parent ${esc(it.inReplyTo)} is not currently on the board (archived/aged out)">↩ in reply to ${esc(shortId(it.inReplyTo))} (off-board)</span>`;
+  }
+  const replyTo = it.inReplyTo ? esc(it.inReplyTo) : "";
+  const linkable = (it.inReplyTo && parentPresent) ? " linkable" : "";
+  return `
+    <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}">
+      <div class="route">
+        <span class="from">${esc(it.from)}</span>
+        <span class="ar">→</span>
+        <span class="to">${esc(it.to)}</span>
+      </div>
+      <div class="id">${esc(it.id)}</div>
+      <div class="tags">${replyTag}${linkTag}</div>
+    </div>`;
+}
+
+function renderColumn(elId, items, idSet) {
+  const el = document.getElementById(elId);
+  if (!items || !items.length) { el.innerHTML = '<div class="empty">empty</div>'; return; }
+  el.innerHTML = items.map(it => handoffCard(it, idSet)).join("");
+}
+
+function renderRejected(items, idSet) {
+  const count = items ? items.length : 0;
+  document.getElementById("rejCount").textContent = count;
+  const banner = document.getElementById("rejBanner");
+  banner.classList.toggle("clean", count === 0);
+  const list = document.getElementById("rejected");
+  list.innerHTML = (items && items.length)
+    ? items.map(it => handoffCard(it, idSet)).join("")
+    : "";
+}
+
+// ---- Visual reply links: SVG connectors between a reply card and its parent ----
+const SVGNS = "http://www.w3.org/2000/svg";
+
+function drawConnectors() {
+  const svg = document.getElementById("connectors");
+  const area = document.getElementById("flowArea");
+  if (!svg || !area) return;
+
+  // clear previously drawn paths/nodes but keep <defs>
+  [...svg.querySelectorAll(".conn, .cnode")].forEach(n => n.remove());
+
+  const W = area.clientWidth;
+  const H = area.scrollHeight;
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+  svg.style.height = H + "px";
+
+  const a = area.getBoundingClientRect();
+  const cards = new Map();
+  area.querySelectorAll(".handoff[data-id]").forEach(el => cards.set(el.getAttribute("data-id"), el));
+
+  cards.forEach((childEl, id) => {
+    const pid = childEl.getAttribute("data-reply-to");
+    if (!pid) return;
+    const parentEl = cards.get(pid);
+    if (!parentEl) return; // graceful: parent off-board -> no connector, fallback tag stays
+
+    const c = childEl.getBoundingClientRect();
+    const p = parentEl.getBoundingClientRect();
+    const cCx = c.left + c.width / 2, pCx = p.left + p.width / 2;
+    const cy = c.top - a.top + c.height / 2;
+    const py = p.top - a.top + p.height / 2;
+
+    let cx, px, c1x, c2x;
+    if (Math.abs(pCx - cCx) < 6) {
+      // same column: anchor both on the LEFT edge and bow into the gutter to the left.
+      // (Bowing right would run off-screen for the rightmost 'done' column, which is
+      // where most reply<->parent pairs live.) Clamp so it never leaves the area.
+      cx = c.left - a.left;
+      px = p.left - a.left;
+      const bow = Math.max(8, Math.min(cx, px) - 30);
+      c1x = bow; c2x = bow;
+    } else if (pCx > cCx) {
+      // parent to the right: child right edge -> parent left edge
+      cx = c.right - a.left;
+      px = p.left - a.left;
+      const mid = (cx + px) / 2;
+      c1x = mid; c2x = mid;
+    } else {
+      // parent to the left: child left edge -> parent right edge
+      cx = c.left - a.left;
+      px = p.right - a.left;
+      const mid = (cx + px) / 2;
+      c1x = mid; c2x = mid;
+    }
+
+    const path = document.createElementNS(SVGNS, "path");
+    path.setAttribute("class", "conn");
+    path.setAttribute("d", `M ${cx},${cy} C ${c1x},${cy} ${c2x},${py} ${px},${py}`);
+    path.setAttribute("data-child", id);
+    path.setAttribute("data-parent", pid);
+    svg.appendChild(path);
+
+    // small node at the child (origin) end
+    const node = document.createElementNS(SVGNS, "circle");
+    node.setAttribute("class", "cnode");
+    node.setAttribute("cx", cx);
+    node.setAttribute("cy", cy);
+    node.setAttribute("r", "2.6");
+    node.setAttribute("data-child", id);
+    node.setAttribute("data-parent", pid);
+    svg.appendChild(node);
+  });
+}
+
+function applyHighlight(id) {
+  const area = document.getElementById("flowArea");
+  const cards = [...area.querySelectorAll(".handoff[data-id]")];
+  const hovered = cards.find(e => e.getAttribute("data-id") === id);
+  if (!hovered) { clearHighlight(); return; }
+
+  const pid = hovered.getAttribute("data-reply-to") || null;
+  const hl = new Set([id]);
+  if (pid) hl.add(pid);
+  cards.forEach(e => {
+    if (e.getAttribute("data-reply-to") === id) hl.add(e.getAttribute("data-id"));
+  });
+
+  cards.forEach(e => {
+    const eid = e.getAttribute("data-id");
+    e.classList.toggle("hl", hl.has(eid));
+    e.classList.toggle("dim", !hl.has(eid));
+  });
+  area.querySelectorAll("#connectors .conn, #connectors .cnode").forEach(el => {
+    const ch = el.getAttribute("data-child"), pa = el.getAttribute("data-parent");
+    const rel = ch === id || pa === id;
+    el.classList.toggle("hl", rel);
+    el.classList.toggle("dim", !rel);
+  });
+}
+
+function clearHighlight() {
+  document.querySelectorAll(".handoff.hl, .handoff.dim").forEach(e => e.classList.remove("hl", "dim"));
+  document.querySelectorAll("#connectors .hl, #connectors .dim").forEach(e => e.classList.remove("hl", "dim"));
+}
+
+// Event delegation so it survives DOM rebuilds.
+document.getElementById("flowArea").addEventListener("mouseover", e => {
+  const card = e.target.closest(".handoff[data-id]");
+  if (!card) return;
+  hoveredId = card.getAttribute("data-id");
+  applyHighlight(hoveredId);
+});
+document.getElementById("flowArea").addEventListener("mouseleave", () => {
+  hoveredId = null;
+  clearHighlight();
+});
+
+function renderHandoffs(h) {
+  const idSet = buildIdSet(h);
+  renderColumn("inbox", h.inbox, idSet);
+  renderColumn("processing", h.processing, idSet);
+  renderColumn("done", h.done, idSet);
+  renderRejected(h.rejected, idSet);
+  drawConnectors();
+  // reapply hover if the hovered card still exists after the rebuild
+  if (hoveredId && document.querySelector(`.handoff[data-id="${cssEscape(hoveredId)}"]`)) {
+    applyHighlight(hoveredId);
+  } else {
+    hoveredId = null;
+  }
+}
+
+// minimal CSS.escape fallback (ids are timestamp-ish but stay safe regardless)
+function cssEscape(s) {
+  if (window.CSS && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, ch => "\\" + ch);
+}
+
+function render(state) {
+  document.getElementById("busRoot").textContent = state.busRoot || "?";
+  document.getElementById("now").textContent = fmtClock(state.now);
+  renderSessions(state.sessions || []);
+
+  const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
+  // signature of column membership; rebuild handoff DOM (and connectors) only when it changes,
+  // so the live poll never flickers the connectors or drops an active hover.
+  const sig = JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
+    (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
+  if (sig !== lastHandoffSig) {
+    lastHandoffSig = sig;
+    renderHandoffs(h);
+  }
+}
+
+async function tick() {
+  try {
+    const r = await fetch(API, { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const state = await r.json();
+    usedLiveOnce = true;
+    setSource("live");
+    render(state);
+  } catch (e) {
+    if (usedLiveOnce) {
+      setSource("down");
+    } else {
+      setSource("mock");
+      render(mockState());
+    }
+  }
+}
+
+// Card positions shift on resize -> redraw connectors against current layout.
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    drawConnectors();
+    if (hoveredId) applyHighlight(hoveredId);
+  }, 120);
+});
+
+tick();
+setInterval(tick, POLL_MS);
+</script>
+</body>
+</html>

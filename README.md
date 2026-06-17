@@ -15,7 +15,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 /plugin install bus@claude-bus
 ```
 
-Os hooks (`UserPromptSubmit`/`Stop`) entram automaticamente com o plugin — sem editar `settings.json`.
+Os hooks (`UserPromptSubmit` / `Stop` / `PostToolUse`) entram automaticamente com o plugin (sem editar `settings.json`).
 
 ## Uso
 
@@ -28,7 +28,7 @@ Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff e
 | SO | Runtime | Status |
 |---|---|---|
 | Windows | PowerShell (nativo) | ✅ testado |
-| macOS / Linux | bash (nativo) | ⚠️ portado, **ainda não validado na plataforma** — feedback bem-vindo |
+| macOS / Linux | bash (nativo) | ✅ validado em macOS (feedback de Linux bem-vindo) |
 
 Sem dependências a instalar: usa o PowerShell do Windows e o bash do macOS/Linux.
 
@@ -37,6 +37,17 @@ Sem dependências a instalar: usa o PowerShell do Windows e o bash do macOS/Linu
 - **BUS** = pasta compartilhada entre as sessões: `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix). Override pela env `CLAUDE_BUS_ROOT`.
 - **Monitor** roda em background, faz polling no shell (não gasta tokens do modelo) e sai ao achar um handoff → isso re-invoca/acorda a sessão.
 - **Hooks** marcam a sessão `busy`/`free`; o monitor só entrega o handoff quando `free`, pra o wake não ser engolido no meio de um turno.
+- **Heartbeat de presença** é atualizado pelo monitor (durante a ociosidade) e por um hook `PostToolUse` (durante a atividade). Como o monitor sai ao entregar um handoff e só volta no fim do turno, o hook mantém uma sessão que está trabalhando "viva" na presença mesmo sem monitor; já uma sessão que parou de verdade some da presença. É isso que deixa o dashboard distinguir "processando" de "offline".
+
+## Dashboard ao vivo (incluso)
+
+A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real: presença das sessões (busy / free / offline), handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, e os rejeitados por auth. É **estritamente somente leitura** sobre o BUS.
+
+```
+node dashboard/server.js   # http://localhost:7878 (porta via env PORT)
+```
+
+Detalhes e contrato da API em [`dashboard/README.md`](dashboard/README.md) e [`dashboard/ARCHITECTURE.md`](dashboard/ARCHITECTURE.md).
 
 ## Segurança
 
