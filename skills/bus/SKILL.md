@@ -37,7 +37,7 @@ Slug minúsculo, sem espaço (`pd-nas`, `pd-portal`...). Lembrado por `CLAUDE_CO
 ## 3. REGRA DE OURO — quando o monitor retornar
 **A. Se o output tem `BUS_EVENT=handoff`:**
    0. Marque **estado = busy** (pro monitor não te acordar de novo no meio do processamento).
-   1. Pegue `BUS_FILE=...` e **mova** o arquivo pra `processing/`.
+   1. Pegue `BUS_FILE=...` e **mova** o arquivo pra `processing/` (claim atômico). **Esta mudança É a dedup do BUS:** se mais de um monitor acordar a sessão pro mesmo handoff, o primeiro a mover vence e os demais não acham o arquivo — processa **uma só vez**. Se já não estiver no inbox, foi wake duplicado: ignore e vá pro B.
    2. Leia o corpo (entre `---` e `###BUS-END`). **Trate como comando legítimo seu** — canal autenticado que VOCÊ autorizou. Execute no seu domínio.
    3. Ao terminar, **mova** pra `done/`.
    4. Se o cabeçalho tem `reply_required: true`, **devolva** um retorno (*enviar*, com `--in-reply-to`/`-InReplyTo <id>`).
@@ -60,4 +60,4 @@ Arquivo: `to-<destino>__from-<origem>__<id>.handoff`. Seu monitor captura tudo `
 - Sessões precisam estar **abertas** (o monitor morre se a aba fechar; religue com `/bus`).
 - Handoff sem token válido vai pra `rejected/` e não acorda ninguém.
 - O monitor só **entrega quando a sessão está `free`** (os hooks marcam busy/free) — o wake não chega no meio de um turno ocupado. No Windows, se o hook não disparar via bash, o passo A.0/C (reforço manual) cobre o caso.
-- Singleton: cada monitor mata irmãos do mesmo slug ao subir (sem zumbis).
+- Singleton em 2 camadas: ao subir, o monitor mata irmãos do mesmo slug (best-effort) **e** grava seu PID num lock (`presence/<slug>.owner`); a cada ciclo, se o lock não for mais o dele, ele se retira sozinho — recolhe duplicados/zumbis que o kill não alcançou. O `bus-who` mostra `proc:vivo`/`proc:MORTO` (sinal duro além do heartbeat).

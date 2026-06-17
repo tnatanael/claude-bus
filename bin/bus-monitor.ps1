@@ -1,16 +1,8 @@
 # bus-monitor.ps1
-# Watches the BUS inbox for handoffs addressed to this specialist.
-# It exits (which wakes the Claude session) when ONE of these happens:
-#   - a complete, AUTHENTICATED handoff addressed to $Me is found -> BUS_EVENT=handoff
-#   - the yield deadline is reached                               -> BUS_EVENT=yield
-#   - the OS/host kills the background task (timeout)             -> exits, no marker
-# The skill ALWAYS relaunches the monitor on any exit, so every case is recoverable.
-#
-# Handoffs whose "auth:" token does not match the shared secret are moved to
-# rejected\ and never wake the session (blocks casual injection via %TEMP%).
-#
-# Polling happens here in the shell (free), NOT in the model. The session only
-# wakes on real work (a handoff) or on the periodic yield.
+# Watches the BUS inbox for handoffs addressed to this specialist and exits (waking
+# the session) on a handoff, on yield, or if the host kills it. The skill ALWAYS
+# relaunches on exit. Bad-token handoffs go to rejected\ and never wake the session.
+# Polling is in the shell (free), not in the model.
 
 param(
   [Parameter(Mandatory=$true)][string]$Me,
@@ -19,8 +11,7 @@ param(
   [int]$YieldSeconds = 1800
 )
 
-# Forca UTF-8 no stdout: sem isso o PS 5.1 emite no encoding do console e os acentos
-# do corpo do handoff chegam corrompidos (mojibake) na captura do harness.
+# Forca UTF-8 no stdout: sem isso o PS 5.1 corrompe acentos do corpo na captura do harness.
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 function Get-BusSecret([string]$root) {
@@ -37,9 +28,8 @@ function Get-BusSecret([string]$root) {
   return (Get-Content -LiteralPath $path -Raw -Encoding UTF8).Trim()
 }
 
-# Singleton: ao iniciar, mata qualquer outro monitor do MESMO slug (exceto este
-# processo e seu wrapper/pai). Evita o acumulo de processos zumbis quando a sessao
-# relanca o monitor sem o antigo ter morrido de verdade.
+# Singleton (1/2) best-effort: ao iniciar, mata outros monitores do MESMO slug por
+# linha de comando (exceto este e o pai). Pode perder corrida; o lock-PID (2/2) cobre.
 try {
   $self   = $PID
   $parent = (Get-CimInstance Win32_Process -Filter ("ProcessId=" + $self) -ErrorAction SilentlyContinue).ParentProcessId
@@ -55,17 +45,26 @@ $state    = Join-Path $BusRoot 'state'
 New-Item -ItemType Directory -Force -Path $inbox | Out-Null
 New-Item -ItemType Directory -Force -Path $presence | Out-Null
 New-Item -ItemType Directory -Force -Path $state | Out-Null
-$beat = Join-Path $presence ($Me + '.alive')
-$sid  = $env:CLAUDE_CODE_SESSION_ID
+$beat  = Join-Path $presence ($Me + '.alive')
+$owner = Join-Path $presence ($Me + '.owner')
+$sid   = $env:CLAUDE_CODE_SESSION_ID
 $statefile = if ($sid) { Join-Path $state ($sid + '.state') } else { '' }
+
+# Singleton (2/2) cooperativo por lock-PID: gravo meu PID como dono do slug. A cada
+# loop, se o .owner nao for mais o meu PID, outro monitor assumiu e eu saio (exit).
+# Pega duplicados/zumbis que o kill acima nao alcancou -- sem precisar matar ninguem.
+[System.IO.File]::WriteAllText($owner, [string]$PID, (New-Object System.Text.UTF8Encoding($false)))
 
 $secret   = Get-BusSecret $BusRoot
 $prefix   = 'to-' + $Me + '__'
 $deadline = (Get-Date).AddSeconds($YieldSeconds)
 
 while ($true) {
-  # heartbeat de presenca: e assim que outras sessoes sabem que estou escutando
-  [System.IO.File]::WriteAllText($beat, (Get-Date).ToString('o'))
+  [System.IO.File]::WriteAllText($beat, (Get-Date).ToString('o'))   # heartbeat
+  # lock-PID: se outro monitor do mesmo slug assumiu o .owner, eu me retiro
+  $own = (Get-Content -LiteralPath $owner -Raw -ErrorAction SilentlyContinue)
+  if ($own -and ($own.Trim() -ne [string]$PID)) { exit 0 }
+
   $hit = Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue |
          Where-Object { $_.Extension -eq '.handoff' -and $_.Name.StartsWith($prefix) } |
          Sort-Object LastWriteTime |
@@ -73,14 +72,11 @@ while ($true) {
 
   if ($hit) {
     $raw = Get-Content -LiteralPath $hit.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
-    # The end tag is a defensive integrity check on top of the atomic rename.
     if ($raw -and ($raw -match '###BUS-END')) {
       $header = ($raw -split '(?m)^---\s*$', 2)[0]
       $authok = ($header -match '(?m)^auth:\s*(\S+)\s*$') -and ($matches[1] -eq $secret)
       if ($authok) {
-        # So ENTREGA quando a sessao estiver free (state != busy), pra o wake nao
-        # chegar no meio de um turno ocupado e ser engolido. O handoff fica intacto
-        # no inbox enquanto espera; o heartbeat continua pra nao parecer morto.
+        # so entrega quando a sessao estiver free (nao engole o wake no meio de um turno)
         while ($statefile -ne '' -and (Test-Path -LiteralPath $statefile) -and (((Get-Content -LiteralPath $statefile -Raw -ErrorAction SilentlyContinue) -replace '\s','') -eq 'busy')) {
           [System.IO.File]::WriteAllText($beat, (Get-Date).ToString('o'))
           Start-Sleep -Seconds $PollSeconds
@@ -92,17 +88,12 @@ while ($true) {
         Write-Output 'BUS_BODY_END'
         exit 0
       } else {
-        # Bad/missing token: quarantine and keep watching. Do NOT wake the session.
         New-Item -ItemType Directory -Force -Path $rejected | Out-Null
         Move-Item -LiteralPath $hit.FullName -Destination (Join-Path $rejected $hit.Name) -Force -ErrorAction SilentlyContinue
       }
     }
   }
 
-  if ((Get-Date) -ge $deadline) {
-    Write-Output 'BUS_EVENT=yield'
-    exit 0
-  }
-
+  if ((Get-Date) -ge $deadline) { Write-Output 'BUS_EVENT=yield'; exit 0 }
   Start-Sleep -Seconds $PollSeconds
 }
