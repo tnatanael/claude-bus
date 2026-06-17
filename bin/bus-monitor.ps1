@@ -16,7 +16,7 @@ param(
   [Parameter(Mandatory=$true)][string]$Me,
   [string]$BusRoot = (Join-Path $env:TEMP 'claude-bus'),
   [int]$PollSeconds = 2,
-  [int]$YieldSeconds = 14400
+  [int]$YieldSeconds = 1800
 )
 
 # Forca UTF-8 no stdout: sem isso o PS 5.1 emite no encoding do console e os acentos

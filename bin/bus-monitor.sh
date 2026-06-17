@@ -4,7 +4,7 @@
 # ficar 'free' antes de entregar, carimba heartbeat de presenca e mata monitores-irmaos
 # do mesmo slug (singleton). NAO TESTADO no Unix ainda -- validar.
 set -u
-me=""; poll=2; yield=14400
+me=""; poll=2; yield=1800
 bus_root="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
 while [ $# -gt 0 ]; do
   case "$1" in
