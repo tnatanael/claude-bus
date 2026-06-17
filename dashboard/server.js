@@ -194,7 +194,14 @@ const PLACEHOLDER = `<!doctype html><html><head><meta charset="utf-8">
 </body></html>`;
 
 function serveStatic(req, res) {
-  let urlPath = decodeURIComponent((req.url.split('?')[0]) || '/');
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent((req.url.split('?')[0]) || '/');
+  } catch (_) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Bad request');
+    return;
+  }
   if (urlPath === '/') urlPath = '/index.html';
 
   const resolved = path.normalize(path.join(PUBLIC_DIR, urlPath));
@@ -295,7 +302,7 @@ const server = http.createServer((req, res) => {
   res.end('Method not allowed');
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`BUS Live Dashboard backend listening on http://localhost:${PORT}`);
   console.log(`BUS root (read only): ${BUS_ROOT}`);
 });
