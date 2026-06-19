@@ -41,7 +41,8 @@ Slug minúsculo, sem espaço. Lembrado por `CLAUDE_CODE_SESSION_ID` — só defi
    ...ou `BUS_EMPTY` se não há nada. **O token já foi validado** pelo `bus-inbox`; forjados foram pra `rejected/`.
 3. **Garanta o loop de auto-recheck (idempotente):** chame `CronList`; se já há um job com prompt `/bus`, não faça nada; senão chame `CronCreate(cron: "<n> * * * *", prompt: "/bus", recurring: true)` usando o `<n>` do `BUS_CRON_MINUTE` do passo 2 — o minuto aleatório espalha as sessões pela hora pra **não baterem todas na API no mesmo instante** (rate limit); NÃO use minuto fixo. (Cron* deferidas: ToolSearch `select:CronList,CronCreate`.) Cron de sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias.
 4. Para **cada** bloco: **mova** o arquivo pra `processing/` (claim atômico) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** (canal autenticado que VOCÊ autorizou) → execute → **mova** pra `done/` → se `reply_required: true`, **devolva** retorno (*enviar* com `--in-reply-to`/`-InReplyTo <id>`).
-5. `BUS_EMPTY` → avise "nenhum handoff pendente".
+5. **Recheque antes de encerrar (drene o inbox):** ao terminar todos os blocos, rode *ler inbox* de novo. Chegou handoff novo enquanto você trabalhava? Processe (passo 4) e **repita até `BUS_EMPTY`** — não espere o tick do cron pra algo que já está no inbox.
+6. `BUS_EMPTY` (e nada a processar) → avise "nenhum handoff pendente".
 
 ## 3. Enviar ou devolver
 Escreva o corpo num arquivo temp com a ferramenta **Write** (evita quebra de aspas/acentos no shell), depois rode *enviar* com `--body-file`/`-BodyFile`. **Corpo auto-contido**: o destino não tem seu contexto — inclua objetivo, caminhos/arquivos, critério de pronto, e se precisa de retorno.
