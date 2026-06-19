@@ -3,7 +3,7 @@
 Owner: bus-demo-arquitect (architect). Build coordinated by bus-demo-po (PO).
 Implemented by bus-demo-dev-backend (server) and bus-demo-dev-frontend (UI).
 
-> **Atualização v2 (modelo pull).** O BUS abandonou o monitor de fundo: não há mais presença, heartbeat nem busy/free. No `GET /api/state`, o campo `sessions[]` foi substituído por `dispatch[]` — handoffs pendentes por destino, a lista de "onde rodar `/bus`": `"dispatch": [{ "slug": "pd-nas", "pending": 2 }]`. As subpastas `presence/` e `state/` não são mais usadas. As seções abaixo descrevem o design v1 original (presença) e ficam por contexto histórico.
+> **Atualização v2 (modelo pull).** O BUS abandonou o monitor de fundo: não há mais presença, heartbeat nem busy/free. No `GET /api/state` o campo `sessions[]` saiu — o dashboard lê só `handoffs` (inbox/processing/done/rejected) + `counts`; o **inbox** é a fila de pendentes (onde rodar `/bus`). A coluna `done` é filtrada na exibição (últimas 24h, máx 20, mais recente primeiro). As subpastas `presence/` e `state/` não são mais usadas. As seções abaixo descrevem o design v1 original (presença) e ficam por contexto histórico.
 
 ## Goal
 A small, zero-build web app that visualizes the real claude-bus state on disk

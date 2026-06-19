@@ -57,20 +57,6 @@ function safeReadText(file) {
   }
 }
 
-// Dispatch worklist (pull model): group pending inbox handoffs by destination slug.
-// This is the operator's "where to fire /bus next" list. No monitor/presence anymore
-// -- a destination is "interesting" when it has handoffs waiting, not when it's alive.
-function readDispatch(inboxItems) {
-  const counts = {};
-  for (const it of inboxItems) {
-    const to = it.to || '?';
-    counts[to] = (counts[to] || 0) + 1;
-  }
-  return Object.keys(counts)
-    .map(slug => ({ slug, pending: counts[slug] }))
-    .sort((a, b) => (b.pending - a.pending) || a.slug.localeCompare(b.slug));
-}
-
 // Filename: to-<to>__from-<from>__<id>.handoff  (slugs contain hyphens; the "__"
 // double underscore is the field separator). Header in the body is authoritative
 // for reply_required / in_reply_to.
@@ -145,7 +131,6 @@ function buildState() {
   return {
     now,
     busRoot: BUS_ROOT,
-    dispatch: readDispatch(handoffs.inbox || []),
     handoffs,
     counts,
   };

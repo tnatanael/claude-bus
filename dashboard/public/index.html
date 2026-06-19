@@ -85,7 +85,7 @@
   main {
     padding: 20px;
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: 1fr;
     gap: 20px;
     align-items: start;
   }
@@ -326,12 +326,7 @@
 
 <main>
   <section>
-    <div class="section-title">Dispatch <span class="count" id="sessCount">0</span> <span class="hint">handoffs aguardando — rode /bus no destino</span></div>
-    <div id="sessions"></div>
-  </section>
-
-  <section>
-    <div class="section-title">Handoff Flow <span class="hint">hover a handoff to trace its reply link</span></div>
+    <div class="section-title">Handoff Flow <span class="hint">inbox = pendentes (rode /bus no destino) · hover pra ver o vínculo de resposta</span></div>
     <div id="flowArea">
       <svg id="connectors" aria-hidden="true">
         <defs>
@@ -388,10 +383,6 @@ function mockState() {
   return {
     now,
     busRoot: "/tmp/claude-bus (MOCK)",
-    dispatch: [
-      { slug: "bus-demo-dev-backend", pending: 2 },
-      { slug: "bus-demo-arquitect",   pending: 1 }
-    ],
     handoffs: {
       inbox: [
         { id: "20260617-132906-f4db92", from: "bus-demo-po", to: "bus-demo-arquitect", replyRequired: false, inReplyTo: "20260617-132752-5bc55a" }
@@ -447,23 +438,6 @@ function shortId(id) {
   return parts.length >= 3 ? parts.slice(1).join("-") : id;
 }
 
-function renderDispatch(dispatch) {
-  const wrap = document.getElementById("sessions");
-  const total = dispatch.reduce((s, d) => s + d.pending, 0);
-  document.getElementById("sessCount").textContent = total;
-  if (!dispatch.length) { wrap.innerHTML = '<div class="empty">no pending handoffs — inbox clear</div>'; return; }
-  wrap.innerHTML = dispatch.map(d => {
-    const plural = d.pending === 1 ? "" : "s";
-    return `
-      <div class="session">
-        <div class="info">
-          <div class="slug">${esc(d.slug)}</div>
-          <div class="beat">${d.pending} handoff${plural} aguardando — rode <b>/bus ${esc(d.slug)}</b></div>
-        </div>
-        <div class="badge busy" title="handoffs pendentes para este destino">${d.pending}</div>
-      </div>`;
-  }).join("");
-}
 
 // Set of every handoff id currently on the board, so we know which replies can be linked.
 function buildIdSet(h) {
@@ -655,7 +629,6 @@ function cssEscape(s) {
 function render(state) {
   document.getElementById("busRoot").textContent = state.busRoot || "?";
   document.getElementById("now").textContent = fmtClock(state.now);
-  renderDispatch(state.dispatch || []);
 
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
   // signature of column membership; rebuild handoff DOM (and connectors) only when it changes,
