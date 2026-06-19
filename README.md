@@ -1,12 +1,14 @@
 # claude-bus
 
-Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("especialistas"). Cada sessão vira um especialista; eles trocam **handoffs** por um BUS de arquivos, com:
+Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("especialistas"). Cada sessão vira um especialista; eles trocam **handoffs** por um BUS de arquivos.
 
-- **Wake autônomo** — a sessão-alvo (se aberta) acorda sozinha quando chega um handoff.
-- **Presença** (`bus-who`) — veja quem está realmente escutando, sem adivinhar.
-- **Autenticação por token** — handoffs forjados vão pra quarentena.
+**Modelo pull (sem monitor de fundo).** Você roda `/bus` numa sessão e ela processa na hora os handoffs pendentes pra ela. Quem envia termina com uma linha de despacho (`📨 Handoffs para: x, y, z`) dizendo onde rodar `/bus` em seguida. Versões anteriores usavam um monitor autônomo em background; ele foi removido — gastava token à toa e morria em silêncio quando o host matava o processo. Pull é simples, confiável e tem **custo ocioso zero**.
+
+- **Processamento on-demand** — `/bus` lê o inbox, valida o token, executa os handoffs e arquiva.
+- **Autenticação por token** — handoffs forjados vão pra quarentena (`rejected/`) antes de qualquer execução.
 - **Auto-nome por sessão** — define o slug 1× por sessão; religações são só `/bus`.
-- **Singleton + busy/free** — sem processos-zumbi; o wake não chega no meio de um turno ocupado.
+- **Linha de despacho** — cada envio diz ao operador onde disparar o próximo `/bus`.
+- **Operação desassistida opcional** — `/loop 1h /bus` recheca o inbox de hora em hora quando você sai.
 
 ## Instalação
 
@@ -15,13 +17,11 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 /plugin install bus@claude-bus
 ```
 
-Os hooks (`UserPromptSubmit` / `Stop` / `PostToolUse`) entram automaticamente com o plugin (sem editar `settings.json`).
-
 ## Uso
 
-Em cada sessão que vai participar, rode **uma vez**: `/bus <slug>` (ex.: `/bus pd-nas`). Depois disso, religar é só `/bus` (ele lembra o slug pela sessão).
+Em cada sessão que vai participar, rode **uma vez**: `/bus <slug>` (ex.: `/bus pd-nas`). Depois, religar/rechecar é só `/bus` (ele lembra o slug pela sessão).
 
-Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino; o destino acorda e processa. Acompanhe quem está ativo com o `bus-who`.
+Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. Para cobrir o período em que está ausente, arme `/loop 1h /bus` nas sessões — elas recheckam o inbox a cada hora.
 
 ## Plataformas
 
@@ -30,18 +30,18 @@ Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff e
 | Windows | PowerShell (nativo) | ✅ testado |
 | macOS / Linux | bash (nativo) | ✅ validado em macOS (feedback de Linux bem-vindo) |
 
-Sem dependências a instalar: usa o PowerShell do Windows e o bash do macOS/Linux.
+Sem dependências: usa o PowerShell do Windows e o bash do macOS/Linux.
 
 ## Como funciona
 
-- **BUS** = pasta compartilhada entre as sessões: `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix). Override pela env `CLAUDE_BUS_ROOT`.
-- **Monitor** roda em background, faz polling no shell (não gasta tokens do modelo) e sai ao achar um handoff → isso re-invoca/acorda a sessão.
-- **Hooks** marcam a sessão `busy`/`free`; o monitor só entrega o handoff quando `free`, pra o wake não ser engolido no meio de um turno.
-- **Heartbeat de presença** é atualizado pelo monitor (durante a ociosidade) e por um hook `PostToolUse` (durante a atividade). Como o monitor sai ao entregar um handoff e só volta no fim do turno, o hook mantém uma sessão que está trabalhando "viva" na presença mesmo sem monitor; já uma sessão que parou de verdade some da presença. É isso que deixa o dashboard distinguir "processando" de "offline".
+- **BUS** = pasta compartilhada entre as sessões: `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix). Override pela env `CLAUDE_BUS_ROOT`. Subpastas: `inbox/ processing/ done/ rejected/ names/`.
+- Cada handoff é um arquivo `to-<destino>__from-<origem>__<id>.handoff`, escrito atomicamente e com um token de auth.
+- `/bus` chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido).
+- Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o `/loop` ticar).
 
 ## Dashboard ao vivo (incluso)
 
-A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real: presença das sessões (busy / free / offline), handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, e os rejeitados por auth. É **estritamente somente leitura** sobre o BUS.
+A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real: a **lista de despacho** (handoffs pendentes por destino — onde rodar `/bus`), handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, e os rejeitados por auth. É **estritamente somente leitura** sobre o BUS.
 
 ```
 node dashboard/server.js   # http://localhost:7878 (porta via env PORT)
@@ -51,7 +51,7 @@ Detalhes e contrato da API em [`dashboard/README.md`](dashboard/README.md) e [`d
 
 ## Segurança
 
-A pasta do BUS é gravável por qualquer processo do seu usuário. O token (`.bus-secret`) barra injeção **casual**, não malware dedicado que leia o disco. Use em ambiente de confiança e em sessões em modo auto que você controla.
+A pasta do BUS é gravável por qualquer processo do seu usuário. O token (`.bus-secret`) barra injeção **casual**, não malware dedicado que leia o disco. O `bus-inbox` valida o token antes de a sessão tratar o corpo como comando. Use em ambiente de confiança e em sessões em modo auto que você controla.
 
 ## Licença
 

@@ -56,68 +56,18 @@ function safeReadText(file) {
   }
 }
 
-// names/<sessionId>.txt -> slug. Returns { slugToSessionId, sessionIdToSlug }.
-function readNameMaps() {
-  const slugToSessionId = {};
-  const sessionIdToSlug = {};
-  for (const f of safeReaddir(path.join(BUS_ROOT, 'names'))) {
-    if (!f.endsWith('.txt')) continue;
-    const sessionId = f.slice(0, -'.txt'.length);
-    const slug = (safeReadText(path.join(BUS_ROOT, 'names', f)) || '').trim();
-    if (!slug) continue;
-    sessionIdToSlug[sessionId] = slug;
-    slugToSessionId[slug] = sessionId; // last writer wins; one slug == one live session
+// Dispatch worklist (pull model): group pending inbox handoffs by destination slug.
+// This is the operator's "where to fire /bus next" list. No monitor/presence anymore
+// -- a destination is "interesting" when it has handoffs waiting, not when it's alive.
+function readDispatch(inboxItems) {
+  const counts = {};
+  for (const it of inboxItems) {
+    const to = it.to || '?';
+    counts[to] = (counts[to] || 0) + 1;
   }
-  return { slugToSessionId, sessionIdToSlug };
-}
-
-// state/<sessionId>.state -> "busy" | "free"
-function readStateMap() {
-  const map = {};
-  for (const f of safeReaddir(path.join(BUS_ROOT, 'state'))) {
-    if (!f.endsWith('.state')) continue;
-    const sessionId = f.slice(0, -'.state'.length);
-    const v = (safeReadText(path.join(BUS_ROOT, 'state', f)) || '').trim();
-    if (v) map[sessionId] = v;
-  }
-  return map;
-}
-
-// presence/<slug>.alive : mtime is the last heartbeat. The heartbeat is kept fresh
-// both by the monitor (while idle) and by a PostToolUse hook (while the session is
-// actively working but its monitor has exited), so `alive` is a reliable signal of
-// "in the BUS and/or working".
-function readSessions(now) {
-  const { slugToSessionId } = readNameMaps();
-  const stateMap = readStateMap();
-  const presenceDir = path.join(BUS_ROOT, 'presence');
-  const sessions = [];
-
-  for (const f of safeReaddir(presenceDir)) {
-    if (!f.endsWith('.alive')) continue;
-    const slug = f.slice(0, -'.alive'.length);
-    let lastBeatAgeSec = null;
-    try {
-      const st = fs.statSync(path.join(presenceDir, f));
-      lastBeatAgeSec = Math.max(0, now - Math.floor(st.mtimeMs / 1000));
-    } catch (_) {
-      continue;
-    }
-    const sessionId = slugToSessionId[slug];
-    const state = (sessionId && stateMap[sessionId]) ? stateMap[sessionId] : 'unknown';
-    // presence/<slug>.ver : version stamped by the monitor on startup (v0.4.1+).
-    const version = (safeReadText(path.join(presenceDir, slug + '.ver')) || '').trim() || null;
-    sessions.push({
-      slug,
-      state,
-      version,
-      alive: lastBeatAgeSec <= ALIVE_MAX_AGE_SEC,
-      lastBeatAgeSec,
-    });
-  }
-
-  sessions.sort((a, b) => a.slug.localeCompare(b.slug));
-  return sessions;
+  return Object.keys(counts)
+    .map(slug => ({ slug, pending: counts[slug] }))
+    .sort((a, b) => (b.pending - a.pending) || a.slug.localeCompare(b.slug));
 }
 
 // Filename: to-<to>__from-<from>__<id>.handoff  (slugs contain hyphens; the "__"
@@ -178,7 +128,7 @@ function buildState() {
   return {
     now,
     busRoot: BUS_ROOT,
-    sessions: readSessions(now),
+    dispatch: readDispatch(handoffs.inbox || []),
     handoffs,
     counts,
   };

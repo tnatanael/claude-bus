@@ -326,7 +326,7 @@
 
 <main>
   <section>
-    <div class="section-title">Presence <span class="count" id="sessCount">0</span></div>
+    <div class="section-title">Dispatch <span class="count" id="sessCount">0</span> <span class="hint">handoffs aguardando — rode /bus no destino</span></div>
     <div id="sessions"></div>
   </section>
 
@@ -388,12 +388,9 @@ function mockState() {
   return {
     now,
     busRoot: "/tmp/claude-bus (MOCK)",
-    sessions: [
-      { slug: "bus-demo-arquitect",    state: "free",    alive: true,  lastBeatAgeSec: 2,   version: "0.4.1" },
-      { slug: "bus-demo-po",           state: "busy",    alive: true,  lastBeatAgeSec: 1,   version: "0.4.1" },
-      { slug: "bus-demo-dev-backend",  state: "busy",    alive: true,  lastBeatAgeSec: 4,   version: "0.4.1" },
-      { slug: "bus-demo-dev-frontend", state: "busy",    alive: true,  lastBeatAgeSec: 0,   version: "0.4.0" },
-      { slug: "bus-demo-ghost",        state: "unknown", alive: false, lastBeatAgeSec: 300, version: null }
+    dispatch: [
+      { slug: "bus-demo-dev-backend", pending: 2 },
+      { slug: "bus-demo-arquitect",   pending: 1 }
     ],
     handoffs: {
       inbox: [
@@ -450,36 +447,20 @@ function shortId(id) {
   return parts.length >= 3 ? parts.slice(1).join("-") : id;
 }
 
-function renderSessions(sessions) {
+function renderDispatch(dispatch) {
   const wrap = document.getElementById("sessions");
-  document.getElementById("sessCount").textContent = sessions.length;
-  if (!sessions.length) { wrap.innerHTML = '<div class="empty">no sessions present</div>'; return; }
-  wrap.innerHTML = sessions.map(s => {
-    const state = (s.state || "unknown").toLowerCase();
-    const stateCls = ["busy", "free", "unknown"].includes(state) ? state : "unknown";
-    // `alive` (heartbeat fresh, <=120s) is kept up BOTH by the monitor (while idle)
-    // and by a PostToolUse hook (while the session is actively working but its
-    // monitor has exited), so it reliably means "in the BUS and/or working". When
-    // it goes stale the session is neither, so show OFFLINE rather than a frozen
-    // busy/free from a state file that stopped being updated.
-    const badge = s.alive ? stateCls : "offline";
-    const aliveCls = s.alive ? "alive" : "dead";
-    const dotTitle = s.alive ? "alive: heartbeat fresh (monitor or recent activity)" : "no recent heartbeat";
-    const badgeTitle = s.alive ? ("session state: " + esc(stateCls))
-      : ("offline: no heartbeat (monitor stopped, no recent activity); last state on disk was " + esc(stateCls));
-    const ver = s.version ? ("v" + s.version) : "—";
-    const verCls = s.version ? "" : "unknown";
-    const verTitle = s.version ? ("monitor version " + esc(s.version))
-      : "monitor version unknown (predates v0.4.1, which started stamping it)";
+  const total = dispatch.reduce((s, d) => s + d.pending, 0);
+  document.getElementById("sessCount").textContent = total;
+  if (!dispatch.length) { wrap.innerHTML = '<div class="empty">no pending handoffs — inbox clear</div>'; return; }
+  wrap.innerHTML = dispatch.map(d => {
+    const plural = d.pending === 1 ? "" : "s";
     return `
       <div class="session">
-        <div class="alive-dot ${aliveCls}" title="${dotTitle}"></div>
         <div class="info">
-          <div class="slug">${esc(s.slug)}</div>
-          <div class="beat">last beat ${esc(fmtAge(s.lastBeatAgeSec))}</div>
+          <div class="slug">${esc(d.slug)}</div>
+          <div class="beat">${d.pending} handoff${plural} aguardando — rode <b>/bus ${esc(d.slug)}</b></div>
         </div>
-        <div class="ver ${verCls}" title="${verTitle}">${esc(ver)}</div>
-        <div class="badge ${badge}" title="${badgeTitle}">${esc(badge)}</div>
+        <div class="badge busy" title="handoffs pendentes para este destino">${d.pending}</div>
       </div>`;
   }).join("");
 }
@@ -674,7 +655,7 @@ function cssEscape(s) {
 function render(state) {
   document.getElementById("busRoot").textContent = state.busRoot || "?";
   document.getElementById("now").textContent = fmtClock(state.now);
-  renderSessions(state.sessions || []);
+  renderDispatch(state.dispatch || []);
 
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
   // signature of column membership; rebuild handoff DOM (and connectors) only when it changes,

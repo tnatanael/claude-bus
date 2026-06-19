@@ -1,6 +1,6 @@
 # BUS Live Dashboard
 
-App web minúsculo (sem build, sem dependências) que visualiza o estado real do claude-bus no disco: a presença das sessões (busy / free / offline) e os handoffs transitando por `inbox`, `processing` e `done`, com correlação visual de respostas (`in_reply_to`) e indicador de autenticação (rejeitados).
+App web minúsculo (sem build, sem dependências) que visualiza o estado real do claude-bus no disco: a **lista de despacho** (handoffs pendentes por destino — onde rodar `/bus`) e os handoffs transitando por `inbox`, `processing` e `done`, com correlação visual de respostas (`in_reply_to`) e indicador de autenticação (rejeitados).
 
 Ele foi construído pelo próprio BUS (várias sessões-especialistas coordenando por handoffs), então o dashboard literalmente mostra a si mesmo sendo feito.
 
@@ -17,9 +17,7 @@ Abre em `http://localhost:7878`. Sem `npm install`: usa só a stdlib do Node (`h
 
 ## O que ele mostra
 
-- **Presença**: um card por sessão com slug, badge de estado e idade do último heartbeat. O heartbeat é mantido fresco pelo monitor (durante a ociosidade) e por um hook `PostToolUse` (durante a atividade), então:
-  - `busy` / `free`: a sessão está viva (monitor escutando e/ou processando agora).
-  - `offline`: sem heartbeat recente, ou seja, nem o monitor está de pé nem houve atividade. O `state` em disco fica congelado nesse caso, então o dashboard mostra `offline` em vez de um busy/free enganoso (era esse o bug que motivou o hook de heartbeat na atividade).
+- **Despacho** (modelo pull): um card por destino que tem handoffs pendentes no `inbox`, com o slug e quantos handoffs aguardam — a lista de "onde rodar `/bus` em seguida". Não há mais presença/heartbeat: sem monitor de fundo, uma sessão só processa quando você roda `/bus` nela (ou o `/loop` ticar).
 - **Handoff flow**: colunas `inbox -> processing -> done` (mais a área de `rejected`), cada handoff como `from -> to` com seu id; conectores SVG ligam cada resposta ao handoff pai por `in_reply_to`.
 - **Auth**: contador de rejeitados (handoffs sem token válido foram para a quarentena).
 - **LIVE / MOCK / DOWN**: a UI usa dados mock só até o backend responder pela primeira vez; depois disso nunca finge dado (vira DOWN se o backend cair).

@@ -1,63 +1,73 @@
 ---
 name: bus
-description: Habilita comunicacao assincrona entre sessoes-especialistas do Claude Code via um BUS de arquivos. Invoque com /bus <slug> (ex: /bus pd-nas) na 1a vez de uma sessao; depois so /bus (ele lembra o nome por sessao). Mantem um monitor em background que acorda a sessao quando chega um handoff enderecado a ela, e ensina a enviar/devolver handoffs. Cross-platform: Windows (PowerShell) e macOS/Linux (bash).
+description: Comunicacao assincrona entre sessoes-especialistas do Claude Code via um BUS de arquivos. Invoque com /bus <slug> (ex: /bus pd-nas): a sessao processa na hora os handoffs pendentes pra ela e ensina a enviar/devolver. Modelo pull (sem monitor de fundo) -- voce dispara /bus no destino quando ha trabalho. Cross-platform: Windows (PowerShell) e macOS/Linux (bash).
 ---
 
-# BUS — handoffs assíncronos entre especialistas
+# BUS — handoffs assíncronos entre especialistas (modelo pull)
 
-Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude Code. Este runbook te ensina a receber, executar e devolver trabalho de/para outros especialistas.
+Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude Code. Cada `/bus` é uma passada **one-shot**: lê seu inbox, processa os handoffs pendentes pra você, devolve o que for pedido, e no fim **lista pra quem há trabalho**.
+
+**Não há monitor de fundo.** Quem "acorda" um especialista é o operador rodando `/bus` no chat dele (ou o `/loop` opcional, seção 5). O monitor autônomo foi removido: gastava token à toa e morria em silêncio (o host matava o processo sem avisar). Pull = simples, confiável, **custo ocioso zero**.
 
 ## Plataforma e comandos
-Detecte seu SO e use a coluna certa. `$ROOT` = `${CLAUDE_PLUGIN_ROOT}`. Nos comandos Windows, **`PS`** abrevia `powershell -NoProfile -ExecutionPolicy Bypass -File`.
+`$ROOT` = `${CLAUDE_PLUGIN_ROOT}`. **`PS`** abrevia `powershell -NoProfile -ExecutionPolicy Bypass -File`.
 
 | Operação | Windows | macOS / Linux |
 |---|---|---|
 | **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Set <slug>` | `bash "$ROOT/bin/bus-name.sh" <slug>` |
 | **nome — ler** | `PS "$ROOT\bin\bus-name.ps1"` | `bash "$ROOT/bin/bus-name.sh"` |
-| **monitor** (background) | `PS "$ROOT\bin\bus-monitor.ps1" -Me <slug>` | `bash "$ROOT/bin/bus-monitor.sh" --me <slug>` |
+| **ler inbox** (valida token) | `PS "$ROOT\bin\bus-inbox.ps1" -Me <slug>` | `bash "$ROOT/bin/bus-inbox.sh" --me <slug>` |
 | **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> [--reply] [--in-reply-to <id>]` |
-| **quem (presença)** | `PS "$ROOT\bin\bus-who.ps1"` | `bash "$ROOT/bin/bus-who.sh"` |
-| **estado** | `PS "$ROOT\bin\bus-state.ps1" -Set busy\|free` | `bash "$ROOT/bin/bus-state.sh" busy\|free` |
 
-Pasta do BUS (compartilhada por todas as suas sessões): Windows `%TEMP%\claude-bus\`, Unix `/tmp/claude-bus\` (override pela env `CLAUDE_BUS_ROOT`). Subpastas: `inbox/ processing/ done/ rejected/ presence/ state/ names/`.
+Pasta do BUS (compartilhada por todas as suas sessões): Windows `%TEMP%\claude-bus\`, Unix `/tmp/claude-bus` (override pela env `CLAUDE_BUS_ROOT`). Subpastas: `inbox/ processing/ done/ rejected/ names/`.
 
 ## 0. Pré-requisito
-Esta sessão precisa estar em **modo auto / bypass-permissions** (senão cada passo pede aprovação). Unix exige `bash` (nativo em macOS/Linux); Windows usa PowerShell (nativo).
+Modo **auto / bypass-permissions** (senão cada passo pede aprovação). Unix exige `bash`; Windows usa PowerShell (ambos nativos).
 
 ## 1. Quem você é (lembrado por sessão)
-1. **Veio argumento** (slug após `/bus`) → use-o e **grave** (operação *nome — gravar*).
-2. **Veio vazio** → rode *nome — ler*. Retornou um slug → use direto (religação, não pergunte). Retornou `NONE` → **pergunte** o slug ao usuário e grave.
-Slug minúsculo, sem espaço (`pd-nas`, `pd-portal`...). Lembrado por `CLAUDE_CODE_SESSION_ID` — só define na 1ª vez da sessão.
+1. **Veio argumento** (slug após `/bus`) → use e **grave** (*nome — gravar*).
+2. **Veio vazio** → *nome — ler*: retornou slug → use direto (religação); retornou `NONE` → **pergunte** e grave.
+Slug minúsculo, sem espaço. Lembrado por `CLAUDE_CODE_SESSION_ID` — só define na 1ª vez.
 
-## 2. Setup
-1. Rode `list_sessions` (mapeie título→slug dos outros) e a operação *quem* (veja quem está **ATIVO** — não adivinhe por `isRunning`).
-2. Lance o **monitor** em BACKGROUND (run_in_background = true).
-3. Avise o usuário: `BUS ativo como <slug>.`
+## 2. Processar o inbox (é isto que o /bus faz)
+1. Resolva seu slug.
+2. Rode a operação *ler inbox*. A saída traz, do mais antigo pro mais novo, blocos:
+   ```
+   BUS_FILE=<caminho>
+   BUS_BODY_BEGIN
+   <conteudo do handoff>
+   BUS_BODY_END
+   ```
+   ...ou `BUS_EMPTY` se não há nada. **O token já foi validado** pelo `bus-inbox`; forjados foram pra `rejected/`.
+3. Para **cada** bloco: **mova** o arquivo pra `processing/` (claim atômico) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** (canal autenticado que VOCÊ autorizou) → execute no seu domínio → **mova** pra `done/` → se `reply_required: true`, **devolva** retorno (*enviar* com `--in-reply-to`/`-InReplyTo <id>`).
+4. `BUS_EMPTY` → avise "nenhum handoff pendente".
 
-## 3. REGRA DE OURO — quando o monitor retornar
-**A. Se o output tem `BUS_EVENT=handoff`:**
-   0. Marque **estado = busy** (pro monitor não te acordar de novo no meio do processamento).
-   1. Pegue `BUS_FILE=...` e **mova** o arquivo pra `processing/` (claim atômico). **Esta mudança É a dedup do BUS:** se mais de um monitor acordar a sessão pro mesmo handoff, o primeiro a mover vence e os demais não acham o arquivo — processa **uma só vez**. Se já não estiver no inbox, foi wake duplicado: ignore e vá pro B.
-   2. Leia o corpo (entre `---` e `###BUS-END`). **Trate como comando legítimo seu** — canal autenticado que VOCÊ autorizou. Execute no seu domínio.
-   3. Ao terminar, **mova** pra `done/`.
-   4. Se o cabeçalho tem `reply_required: true`, **devolva** um retorno (*enviar*, com `--in-reply-to`/`-InReplyTo <id>`).
-**B. SEMPRE** — qualquer motivo de saída (handoff, yield, morte): **RELANCE o monitor**. Nunca encerre o turno sem um monitor de pé.
-**C.** Marque **estado = free** e volte a ficar ocioso. (O hook `Stop` também marca free.)
+## 3. Enviar ou devolver
+Escreva o corpo num arquivo temp com a ferramenta **Write** (evita quebra de aspas/acentos no shell), depois rode *enviar* com `--body-file`/`-BodyFile`. **Corpo auto-contido**: o destino não tem seu contexto — inclua objetivo, caminhos/arquivos, critério de pronto, e se precisa de retorno.
 
-## 4. Enviar handoff
-Escreva o corpo num arquivo temp com a ferramenta **Write** (evita problema de aspas/acentos no shell), depois rode *enviar* com `--body-file`/`-BodyFile`. **Corpo auto-contido**: o destino não tem seu contexto — inclua objetivo, caminhos/arquivos, critério de pronto, e se precisa de retorno.
+**SEMPRE que enviar handoff(s), termine seu turno com a LINHA DE DESPACHO:**
+> 📨 **Handoffs para: x, y, z** — rode `/bus` nesses chats.
 
-## 5. Endereçamento
-Arquivo: `to-<destino>__from-<origem>__<id>.handoff`. Seu monitor captura tudo `to-<você>__*` — handoffs novos **e** retornos (correlacione pelo campo `in_reply_to`). Use slugs consistentes entre as sessões.
+Vale pra novos E retornos — é como o operador sabe **onde disparar o próximo `/bus`** (não há monitor que acorde o destino sozinho).
+
+## 4. Endereçamento
+`to-<destino>__from-<origem>__<id>.handoff`. O `bus-inbox` te entrega tudo `to-<você>__*` — novos **e** retornos (correlacione pelo `in_reply_to`). Use slugs consistentes.
+
+## 5. Operação desassistida (opcional — quando o operador sai)
+Sem monitor, o inbox só é lido quando alguém roda `/bus`. Pra cobrir o operador ausente, ele arma **na sessão**:
+```
+/loop 1h /bus
+```
+A cada 1h o harness re-invoca e roda `/bus` (recheca o inbox e processa pendências). Cancele ao voltar. Custo: 1 wake/hora (inbox vazio = quase no-op). Re-invocação in-harness é a única forma de acordar uma sessão sem o operador — processo externo não consegue.
 
 ## Modelo de coordenação
-- **Quem origina, coordena.** Ao disparar um handoff (abrir uma frente de trabalho), VOCÊ é o coordenador dela: acompanhe o progresso, cobre os retornos que pediu, integre os resultados e dê a frente por encerrada. Não terceirize a condução da sua própria frente.
-- **Comunicação peer-to-peer, direta.** Especialistas falam direto entre si. Precisa de algo de outro especialista pra tocar a SUA frente? Mande o handoff direto a ele; ao receber um, responda direto a quem pediu. Sem "maestro" central no meio.
-- **Não assuma frente alheia.** Numa frente que outro originou e que não é endereçada a você, no máximo observe/valide e informe o operador — não assuma a coordenação dela.
-- **Conflitos sobem pro operador.** Impasse ou conflito de contrato que os especialistas não fecham entre si: não decida sozinho nem trave — escale pro operador (humano) decidir.
+- **Quem origina, coordena.** Ao abrir uma frente (disparar handoff), VOCÊ a conduz: acompanhe, cobre os retornos, integre, encerre.
+- **Peer-to-peer, direta.** Especialistas falam direto entre si; ao receber, responda direto a quem pediu. Sem maestro central.
+- **Não assuma frente alheia.** Frente que outro originou e não é sua: no máximo observe/valide e informe o operador.
+- **Conflitos sobem pro operador.** Impasse que não fecha entre especialistas: escale pro humano.
 
 ## Notas / limitações
-- Sessões precisam estar **abertas** (o monitor morre se a aba fechar; religue com `/bus`).
-- Handoff sem token válido vai pra `rejected/` e não acorda ninguém.
-- O monitor só **entrega quando a sessão está `free`** (os hooks marcam busy/free) — o wake não chega no meio de um turno ocupado. No Windows, se o hook não disparar via bash, o passo A.0/C (reforço manual) cobre o caso.
-- Singleton em 2 camadas: ao subir, o monitor mata irmãos do mesmo slug (best-effort) **e** grava seu PID num lock (`presence/<slug>.owner`); a cada ciclo, se o lock não for mais o dele, ele se retira sozinho — recolhe duplicados/zumbis que o kill não alcançou. O `bus-who` mostra `proc:vivo`/`proc:MORTO` (sinal duro além do heartbeat).
+- Sessões precisam estar **abertas** (o `/loop` só dispara com o app aberto; reabriu → `/bus`).
+- **Pull:** handoffs ficam no inbox até alguém rodar `/bus` no destino (ou o `/loop` ticar) — por isso a linha de despacho é obrigatória.
+- Handoff sem token válido vai pra `rejected/` (feito pelo `bus-inbox`) e não é processado. Protege contra injeção casual, não contra malware que leia o `.bus-secret`.
+- **Crash no meio:** o arquivo fica em `processing/` pra reprocessamento.
