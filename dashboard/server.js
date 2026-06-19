@@ -22,8 +22,9 @@ const PORT = Number(process.env.PORT) || 7878;
 const BUS_ROOT = process.env.CLAUDE_BUS_ROOT || '/tmp/claude-bus';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-const ALIVE_MAX_AGE_SEC = 120; // heartbeat older than this => not alive
 const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];
+const DONE_MAX_AGE_SEC = 24 * 3600; // done view: hide handoffs older than 24h
+const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newest first)
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -116,12 +117,28 @@ function readHandoffs(folder) {
   return items;
 }
 
+// Timestamp prefix of a handoff id (YYYYMMDD-HHMMSS-xxxxxx) -> epoch seconds (local
+// time, matching how the sender stamps it). null if it doesn't parse.
+function idToEpochSec(id) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id || '');
+  if (!m) return null;
+  return Math.floor(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() / 1000);
+}
+
 function buildState() {
   const now = Math.floor(Date.now() / 1000);
   const handoffs = {};
   const counts = {};
   for (const folder of HANDOFF_FOLDERS) {
-    const items = readHandoffs(folder);
+    let items = readHandoffs(folder);
+    if (folder === 'done') {
+      // Self-cleaning VIEW (the BUS on disk is never touched -- read-only boundary):
+      // show only the last 24h, newest first, capped to the most recent 20.
+      const cutoff = now - DONE_MAX_AGE_SEC;
+      items = items
+        .filter(it => { const t = idToEpochSec(it.id); return t === null || t >= cutoff; })
+        .slice(0, DONE_MAX_ITEMS);
+    }
     handoffs[folder] = items;
     counts[folder] = items.length;
   }
