@@ -30,6 +30,10 @@ Modo **auto / bypass-permissions** (senão cada passo pede aprovação). Unix ex
 Slug minúsculo, sem espaço. Lembrado por `CLAUDE_CODE_SESSION_ID` — só define na 1ª vez.
 
 ## 2. Processar o inbox (é isto que o /bus faz)
+
+**Primeiro, garanta o loop de auto-recheck (idempotente):** chame `CronList`; se já há um job com prompt exatamente `/bus`, está armado (não faça nada); senão chame `CronCreate(cron: "7 * * * *", prompt: "/bus", recurring: true)` — recheca o inbox de hora em hora mesmo com o operador ausente. (Ferramentas `Cron*` podem estar deferidas: ToolSearch `select:CronList,CronCreate`.) O cron é da sessão (some ao fechar o app, re-armado no próximo `/bus`) e expira em 7 dias.
+
+**Depois:**
 1. Resolva seu slug.
 2. Rode a operação *ler inbox*. A saída traz, do mais antigo pro mais novo, blocos:
    ```
@@ -53,12 +57,8 @@ Vale pra novos E retornos — é como o operador sabe **onde disparar o próximo
 ## 4. Endereçamento
 `to-<destino>__from-<origem>__<id>.handoff`. O `bus-inbox` te entrega tudo `to-<você>__*` — novos **e** retornos (correlacione pelo `in_reply_to`). Use slugs consistentes.
 
-## 5. Operação desassistida (opcional — quando o operador sai)
-Sem monitor, o inbox só é lido quando alguém roda `/bus`. Pra cobrir o operador ausente, ele arma **na sessão**:
-```
-/loop 1h /bus
-```
-A cada 1h o harness re-invoca e roda `/bus` (recheca o inbox e processa pendências). Cancele ao voltar. Custo: 1 wake/hora (inbox vazio = quase no-op). Re-invocação in-harness é a única forma de acordar uma sessão sem o operador — processo externo não consegue.
+## 5. Operação desassistida (loop de auto-recheck)
+O `/bus` **arma sozinho** um cron de hora em hora (passo no início da seção 2) que recheca o inbox — é o que processa handoffs com o operador ausente. Idempotente (checa o `CronList` antes, não duplica). Inspecionar: `CronList`; desarmar: `CronDelete <id>`. O cron é da sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias, e só dispara com o REPL ocioso (não interrompe um turno em andamento). Re-invocação in-harness é a única forma de acordar uma sessão sem o operador — processo externo não consegue.
 
 ## Modelo de coordenação
 - **Quem origina, coordena.** Ao abrir uma frente (disparar handoff), VOCÊ a conduz: acompanhe, cobre os retornos, integre, encerre.

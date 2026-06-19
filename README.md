@@ -8,7 +8,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 - **Autenticação por token** — handoffs forjados vão pra quarentena (`rejected/`) antes de qualquer execução.
 - **Auto-nome por sessão** — define o slug 1× por sessão; religações são só `/bus`.
 - **Linha de despacho** — cada envio diz ao operador onde disparar o próximo `/bus`.
-- **Operação desassistida opcional** — `/loop 1h /bus` recheca o inbox de hora em hora quando você sai.
+- **Operação desassistida automática** — o `/bus` arma sozinho um recheck horário (cron de sessão, idempotente) pra processar handoffs quando você sai.
 
 ## Instalação
 
@@ -21,7 +21,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 
 Em cada sessão que vai participar, rode **uma vez**: `/bus <slug>` (ex.: `/bus pd-nas`). Depois, religar/rechecar é só `/bus` (ele lembra o slug pela sessão).
 
-Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. Para cobrir o período em que está ausente, arme `/loop 1h /bus` nas sessões — elas recheckam o inbox a cada hora.
+Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. O próprio `/bus` arma um recheck horário (cron de sessão, idempotente) que processa handoffs enquanto você está ausente.
 
 ## Plataformas
 
