@@ -326,7 +326,7 @@
 
 <main>
   <section>
-    <div class="section-title">Handoff Flow <span class="hint">inbox = pendentes (rode /bus no destino) · hover pra ver o vínculo de resposta</span></div>
+    <div class="section-title">Handoff Flow <span class="hint">inbox = pendentes (rode /bus no destino) · setas = vínculo de resposta</span></div>
     <div id="flowArea">
       <svg id="connectors" aria-hidden="true">
         <defs>
@@ -593,17 +593,8 @@ function clearHighlight() {
   document.querySelectorAll("#connectors .hl, #connectors .dim").forEach(e => e.classList.remove("hl", "dim"));
 }
 
-// Event delegation so it survives DOM rebuilds.
-document.getElementById("flowArea").addEventListener("mouseover", e => {
-  const card = e.target.closest(".handoff[data-id]");
-  if (!card) return;
-  hoveredId = card.getAttribute("data-id");
-  applyHighlight(hoveredId);
-});
-document.getElementById("flowArea").addEventListener("mouseleave", () => {
-  hoveredId = null;
-  clearHighlight();
-});
+// Highlight no hover desabilitado (por pedido): nada de realçar/escurecer ao passar o
+// mouse. Os conectores de resposta continuam desenhados de forma estática.
 
 function renderHandoffs(h) {
   const idSet = buildIdSet(h);
