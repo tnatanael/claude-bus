@@ -20,6 +20,10 @@ inbox="$bus_root/inbox"; rejected="$bus_root/rejected"
 mkdir -p "$inbox"
 secret=""; [ -f "$bus_root/.bus-secret" ] && secret="$(tr -d ' \r\n' < "$bus_root/.bus-secret")"
 
+# Minuto aleatorio (0-59) pro cron de auto-recheck do /bus: cada sessao arma num
+# minuto diferente pra nao baterem todas na API no mesmo instante (rate limit).
+echo "BUS_CRON_MINUTE=$((RANDOM % 60))"
+
 found=0
 for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   [ -e "$hit" ] || continue

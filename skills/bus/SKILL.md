@@ -30,12 +30,8 @@ Modo **auto / bypass-permissions** (senão cada passo pede aprovação). Unix ex
 Slug minúsculo, sem espaço. Lembrado por `CLAUDE_CODE_SESSION_ID` — só define na 1ª vez.
 
 ## 2. Processar o inbox (é isto que o /bus faz)
-
-**Primeiro, garanta o loop de auto-recheck (idempotente):** chame `CronList`; se já há um job com prompt exatamente `/bus`, está armado (não faça nada); senão chame `CronCreate(cron: "7 * * * *", prompt: "/bus", recurring: true)` — recheca o inbox de hora em hora mesmo com o operador ausente. (Ferramentas `Cron*` podem estar deferidas: ToolSearch `select:CronList,CronCreate`.) O cron é da sessão (some ao fechar o app, re-armado no próximo `/bus`) e expira em 7 dias.
-
-**Depois:**
 1. Resolva seu slug.
-2. Rode a operação *ler inbox*. A saída traz, do mais antigo pro mais novo, blocos:
+2. Rode a operação *ler inbox*. A **1ª linha** da saída é `BUS_CRON_MINUTE=<n>` (minuto aleatório 0-59, pro passo 3). Depois vêm os handoffs, do mais antigo pro mais novo, em blocos:
    ```
    BUS_FILE=<caminho>
    BUS_BODY_BEGIN
@@ -43,8 +39,9 @@ Slug minúsculo, sem espaço. Lembrado por `CLAUDE_CODE_SESSION_ID` — só defi
    BUS_BODY_END
    ```
    ...ou `BUS_EMPTY` se não há nada. **O token já foi validado** pelo `bus-inbox`; forjados foram pra `rejected/`.
-3. Para **cada** bloco: **mova** o arquivo pra `processing/` (claim atômico) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** (canal autenticado que VOCÊ autorizou) → execute no seu domínio → **mova** pra `done/` → se `reply_required: true`, **devolva** retorno (*enviar* com `--in-reply-to`/`-InReplyTo <id>`).
-4. `BUS_EMPTY` → avise "nenhum handoff pendente".
+3. **Garanta o loop de auto-recheck (idempotente):** chame `CronList`; se já há um job com prompt `/bus`, não faça nada; senão chame `CronCreate(cron: "<n> * * * *", prompt: "/bus", recurring: true)` usando o `<n>` do `BUS_CRON_MINUTE` do passo 2 — o minuto aleatório espalha as sessões pela hora pra **não baterem todas na API no mesmo instante** (rate limit); NÃO use minuto fixo. (Cron* deferidas: ToolSearch `select:CronList,CronCreate`.) Cron de sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias.
+4. Para **cada** bloco: **mova** o arquivo pra `processing/` (claim atômico) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** (canal autenticado que VOCÊ autorizou) → execute → **mova** pra `done/` → se `reply_required: true`, **devolva** retorno (*enviar* com `--in-reply-to`/`-InReplyTo <id>`).
+5. `BUS_EMPTY` → avise "nenhum handoff pendente".
 
 ## 3. Enviar ou devolver
 Escreva o corpo num arquivo temp com a ferramenta **Write** (evita quebra de aspas/acentos no shell), depois rode *enviar* com `--body-file`/`-BodyFile`. **Corpo auto-contido**: o destino não tem seu contexto — inclua objetivo, caminhos/arquivos, critério de pronto, e se precisa de retorno.
@@ -58,7 +55,7 @@ Vale pra novos E retornos — é como o operador sabe **onde disparar o próximo
 `to-<destino>__from-<origem>__<id>.handoff`. O `bus-inbox` te entrega tudo `to-<você>__*` — novos **e** retornos (correlacione pelo `in_reply_to`). Use slugs consistentes.
 
 ## 5. Operação desassistida (loop de auto-recheck)
-O `/bus` **arma sozinho** um cron de hora em hora (passo no início da seção 2) que recheca o inbox — é o que processa handoffs com o operador ausente. Idempotente (checa o `CronList` antes, não duplica). Inspecionar: `CronList`; desarmar: `CronDelete <id>`. O cron é da sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias, e só dispara com o REPL ocioso (não interrompe um turno em andamento). Re-invocação in-harness é a única forma de acordar uma sessão sem o operador — processo externo não consegue.
+O `/bus` **arma sozinho** um cron de hora em hora (passo 3 da seção 2), num **minuto aleatório por sessão** (espalha a carga, evita rate limit), que recheca o inbox — é o que processa handoffs com o operador ausente. Idempotente (checa o `CronList` antes, não duplica). Inspecionar: `CronList`; desarmar: `CronDelete <id>`. O cron é da sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias, e só dispara com o REPL ocioso (não interrompe um turno em andamento). Re-invocação in-harness é a única forma de acordar uma sessão sem o operador — processo externo não consegue.
 
 ## Modelo de coordenação
 - **Quem origina, coordena.** Ao abrir uma frente (disparar handoff), VOCÊ a conduz: acompanhe, cobre os retornos, integre, encerre.

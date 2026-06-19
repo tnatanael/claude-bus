@@ -35,6 +35,11 @@ New-Item -ItemType Directory -Force -Path $inbox | Out-Null
 $secret = Get-BusSecret $BusRoot
 $prefix = 'to-' + $Me + '__'
 
+# Minuto aleatorio (0-59) pro cron de auto-recheck do /bus. Cada sessao arma num
+# minuto diferente pra nao baterem todas na API do Claude no mesmo instante (rate
+# limit). So e usado no 1o arm (depois o /bus ve o cron existente e nao re-arma).
+Write-Output ('BUS_CRON_MINUTE=' + (Get-Random -Minimum 0 -Maximum 60))
+
 $hits = Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.handoff' -and $_.Name.StartsWith($prefix) } |
         Sort-Object LastWriteTime
