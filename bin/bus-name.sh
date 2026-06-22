@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# bus-name.sh [slug]   (par Unix do bus-name.ps1)
-# Sem arg: ecoa o slug salvo desta sessao, ou 'NONE'. Com arg: grava e ecoa.
-# Indexado por CLAUDE_CODE_SESSION_ID, pra religacoes do /bus nao redigitarem o nome.
+# bus-name.sh [slug] [project]   (par Unix do bus-name.ps1)
+# Sem args: ecoa o registrado (PROJECT=/SLUG=/BUS_CRON_MINUTE=) ou 'NONE'.
+# Com args: grava (project default='default') e ecoa. Compat: 1 linha antiga = projeto 'default'.
+# names/ fica na raiz BASE (registro global); o isolamento por projeto e nas pastas de handoff.
 set -u
 bus_root="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
 sid="${CLAUDE_CODE_SESSION_ID:-}"
-
 [ -z "$sid" ] && { echo "NONE"; exit 0; }
-
-dir="$bus_root/names"
-mkdir -p "$dir"
+dir="$bus_root/names"; mkdir -p "$dir"
 f="$dir/$sid.txt"
 
+emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$((RANDOM % 60))"; }
+
 if [ -n "${1:-}" ]; then
-  printf '%s' "$1" > "$f"
-  echo "$1"
+  proj="${2:-default}"; [ -z "$proj" ] && proj="default"
+  printf '%s\n%s' "$proj" "$1" > "$f"
+  emit "$proj" "$1"
 elif [ -s "$f" ]; then
-  cat "$f"
+  proj="$(sed -n '1p' "$f")"; slug="$(sed -n '2p' "$f")"
+  if [ -n "$slug" ]; then emit "$proj" "$slug"
+  elif [ -n "$proj" ]; then emit "default" "$proj"   # compat: 1 linha = so slug
+  else echo "NONE"; fi
 else
   echo "NONE"
 fi

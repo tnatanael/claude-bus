@@ -13,6 +13,7 @@ while [ $# -gt 0 ]; do
     --body-file) bodyfile="$2"; shift 2;;
     --reply) reply="true"; shift;;
     --in-reply-to) inreply="$2"; shift 2;;
+    --bus-root) bus_root="$2"; shift 2;;
     *) shift;;
   esac
 done

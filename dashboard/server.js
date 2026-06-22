@@ -83,8 +83,8 @@ function parseHandoffHeader(text) {
   return out;
 }
 
-function readHandoffs(folder) {
-  const dir = path.join(BUS_ROOT, folder);
+function readHandoffs(folder, root) {
+  const dir = path.join(root || BUS_ROOT, folder);
   const items = [];
   for (const f of safeReaddir(dir)) {
     const fromName = parseHandoffFilename(f);
@@ -111,12 +111,13 @@ function idToEpochSec(id) {
   return Math.floor(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() / 1000);
 }
 
-function buildState() {
+function buildState(root) {
+  root = root || BUS_ROOT;
   const now = Math.floor(Date.now() / 1000);
   const handoffs = {};
   const counts = {};
   for (const folder of HANDOFF_FOLDERS) {
-    let items = readHandoffs(folder);
+    let items = readHandoffs(folder, root);
     if (folder === 'done') {
       // Self-cleaning VIEW (the BUS on disk is never touched -- read-only boundary):
       // show only the last 24h, newest first, capped to the most recent 20.
@@ -130,10 +131,59 @@ function buildState() {
   }
   return {
     now,
-    busRoot: BUS_ROOT,
+    busRoot: root,
     handoffs,
     counts,
   };
+}
+
+// --- Projects ------------------------------------------------------------
+// Each project is an isolated BUS namespace. 'default' = the base root (flat,
+// backward-compatible); a named project <p> = <base>/<p> with its own folders.
+function projectRoot(p) {
+  return (!p || p === 'default') ? BUS_ROOT : path.join(BUS_ROOT, p);
+}
+
+const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names', 'presence', 'state']);
+// Projects: always 'default' + every base subdir that isn't a reserved handoff/registry
+// folder or a dotfile. Auto-discovered from the filesystem (read only).
+function listProjects() {
+  const projs = ['default'];
+  for (const name of safeReaddir(BUS_ROOT)) {
+    if (RESERVED_DIRS.has(name) || name.startsWith('.')) continue;
+    let isDir = false;
+    try { isDir = fs.statSync(path.join(BUS_ROOT, name)).isDirectory(); } catch (_) {}
+    if (isDir) projs.push(name);
+  }
+  return projs;
+}
+
+function queryParam(reqUrl, key) {
+  const q = (reqUrl || '').split('?')[1] || '';
+  for (const pair of q.split('&')) {
+    const eq = pair.indexOf('=');
+    const k = eq < 0 ? pair : pair.slice(0, eq);
+    const v = eq < 0 ? '' : pair.slice(eq + 1);
+    try { if (decodeURIComponent(k) === key) return decodeURIComponent(v); } catch (_) {}
+  }
+  return '';
+}
+
+// project='all' -> grouped { now, all:true, projects:[{project,handoffs,counts}] }
+// project=<p>   -> single  { now, project, busRoot, handoffs, counts }
+function buildPayload(p) {
+  p = p || 'all';
+  if (p === 'all') {
+    const now = Math.floor(Date.now() / 1000);
+    const projects = listProjects().map(name => {
+      const st = buildState(projectRoot(name));
+      return { project: name, handoffs: st.handoffs, counts: st.counts };
+    });
+    return { now, all: true, projects };
+  }
+  const st = buildState(projectRoot(p));
+  st.project = p;
+  return st;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +248,7 @@ function sendJson(res, obj) {
 }
 
 function handleEvents(req, res) {
+  const proj = queryParam(req.url, 'project') || 'all';
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-store',
@@ -208,7 +259,7 @@ function handleEvents(req, res) {
   const tick = () => {
     let payload;
     try {
-      payload = JSON.stringify(buildState());
+      payload = JSON.stringify(buildPayload(proj));
     } catch (_) {
       return;
     }
@@ -233,9 +284,15 @@ function handleEvents(req, res) {
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
 
+  if (req.method === 'GET' && urlPath === '/api/projects') {
+    try { sendJson(res, { projects: listProjects() }); }
+    catch (e) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: String(e) })); }
+    return;
+  }
+
   if (req.method === 'GET' && urlPath === '/api/state') {
     try {
-      sendJson(res, buildState());
+      sendJson(res, buildPayload(queryParam(req.url, 'project')));
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'failed to build state', detail: String(e) }));

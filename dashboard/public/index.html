@@ -311,12 +311,17 @@
     font-size: 11px;
     font-family: var(--mono);
   }
+  #projectSel { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; font-family: var(--mono); font-size: 12px; }
+  .section-proj { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .proj-flow { margin-bottom: 22px; }
+  #allSection .section-title { margin-top: 10px; }
 </style>
 </head>
 <body>
 <header>
   <h1><span class="dot">●</span> BUS Live Dashboard</h1>
   <div class="meta">
+    <span>projeto: <select id="projectSel"><option value="all">Todos</option></select></span>
     <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
     <span>bus root: <b id="busRoot">…</b></span>
     <span>now: <b id="now">…</b></span>
@@ -325,8 +330,9 @@
 </header>
 
 <main>
-  <section>
-    <div class="section-title">Handoff Flow <span class="hint">inbox = pendentes (rode /bus no destino) · setas = vínculo de resposta</span></div>
+  <section id="allSection"></section>
+  <section id="singleSection" style="display:none">
+    <div class="section-title">Handoff Flow <span class="section-proj" id="singleProj"></span> <span class="hint">inbox = pendentes (rode /bus no destino) · setas = vínculo de resposta</span></div>
     <div id="flowArea">
       <svg id="connectors" aria-hidden="true">
         <defs>
@@ -374,6 +380,7 @@
 
 const POLL_MS = 1500;
 const API = "/api/state";
+let selectedProject = "all";
 
 // ---- MOCK fallback (used only until the real backend answers) ----
 // Mirrors the authoritative schema in ARCHITECTURE.md so the UI is demonstrable
@@ -468,6 +475,28 @@ function handoffCard(it, idSet) {
       <div class="id">${esc(it.id)}</div>
       <div class="tags">${replyTag}${linkTag}</div>
     </div>`;
+}
+
+// Visão agrupada "Todos": uma seção por projeto (colunas simples, sem conectores).
+function renderAll(projects) {
+  const wrap = document.getElementById("allSection");
+  if (!projects || !projects.length) { wrap.innerHTML = '<div class="empty">nenhum projeto</div>'; return; }
+  const col = (title, items, cls) => {
+    const n = (items || []).length;
+    const body = n ? items.map(it => handoffCard(it, null)).join("") : '<div class="empty">vazio</div>';
+    return `<div class="column ${cls}"><h3>${title} <span class="count">${n}</span></h3>${body}</div>`;
+  };
+  wrap.innerHTML = projects.map(p => {
+    const h = p.handoffs || {};
+    const c = p.counts || {};
+    return `
+      <div class="section-title">📦 ${esc(p.project)} <span class="hint">inbox ${c.inbox||0} · processing ${c.processing||0} · done ${c.done||0} · rejected ${c.rejected||0}</span></div>
+      <div class="flow proj-flow">
+        ${col('Inbox', h.inbox, 'inbox')}
+        ${col('Processing', h.processing, 'processing')}
+        ${col('Done', h.done, 'done')}
+      </div>`;
+  }).join("");
 }
 
 function renderColumn(elId, items, idSet) {
@@ -618,13 +647,29 @@ function cssEscape(s) {
 }
 
 function render(state) {
-  document.getElementById("busRoot").textContent = state.busRoot || "?";
   document.getElementById("now").textContent = fmtClock(state.now);
+  const single = document.getElementById("singleSection");
+  const all = document.getElementById("allSection");
 
+  if (state.all) {
+    // visão agrupada: uma seção por projeto (sem conectores)
+    single.style.display = "none";
+    all.style.display = "";
+    document.getElementById("busRoot").textContent = "(todos os projetos)";
+    const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
+      [p.project, ["inbox","processing","done","rejected"].map(k => (p.handoffs[k]||[]).map(it => it.id).join(","))]));
+    if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
+    return;
+  }
+
+  // visão de um projeto só (flow completo, com conectores)
+  all.style.display = "none";
+  single.style.display = "";
+  document.getElementById("busRoot").textContent = state.busRoot || "?";
+  const sp = document.getElementById("singleProj");
+  if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
-  // signature of column membership; rebuild handoff DOM (and connectors) only when it changes,
-  // so the live poll never flickers the connectors or drops an active hover.
-  const sig = JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
+  const sig = "ONE|" + (state.project || "") + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
   if (sig !== lastHandoffSig) {
     lastHandoffSig = sig;
@@ -634,7 +679,7 @@ function render(state) {
 
 async function tick() {
   try {
-    const r = await fetch(API, { cache: "no-store" });
+    const r = await fetch(API + "?project=" + encodeURIComponent(selectedProject), { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const state = await r.json();
     usedLiveOnce = true;
@@ -660,8 +705,29 @@ window.addEventListener("resize", () => {
   }, 120);
 });
 
+// popula o seletor de projetos; ao trocar, religa o tick no projeto escolhido
+async function loadProjects() {
+  try {
+    const r = await fetch("/api/projects", { cache: "no-store" });
+    if (!r.ok) return;
+    const data = await r.json();
+    const sel = document.getElementById("projectSel");
+    const cur = selectedProject;
+    sel.innerHTML = '<option value="all">Todos</option>' +
+      (data.projects || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    sel.value = cur;
+  } catch (_) {}
+}
+document.getElementById("projectSel").addEventListener("change", e => {
+  selectedProject = e.target.value || "all";
+  lastHandoffSig = "";   // força re-render ao trocar de projeto
+  tick();
+});
+
+loadProjects();
 tick();
 setInterval(tick, POLL_MS);
+setInterval(loadProjects, 15000);   // descobre projetos novos periodicamente
 </script>
 </body>
 </html>

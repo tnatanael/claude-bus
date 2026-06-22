@@ -6,7 +6,7 @@
       "name": "bus",
       "source": "./",
       "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code via um BUS de arquivos (modelo pull, sem monitor): /bus processa o inbox na hora, auth por token, auto-nome por sessao, auto-recheck horario (cron de sessao) e dashboard de despacho. Cross-platform (Windows PowerShell / macOS + Linux bash).",
-      "version": "0.5.6"
+      "version": "0.6.0"
     }
   ]
 }

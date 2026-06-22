@@ -1,12 +1,19 @@
 # bus-name.ps1
-# Resolve o slug do especialista DESTA sessao, indexado por CLAUDE_CODE_SESSION_ID
-# (id estavel por sessao). Persiste o nome para que religacoes do /bus na mesma
-# sessao nao precisem redigita-lo.
-#   -Set <slug>  -> grava o slug desta sessao e ecoa de volta.
-#   (sem -Set)   -> ecoa o slug salvo desta sessao, ou 'NONE' se ainda nao definido.
+# Resolve a IDENTIDADE desta sessao (PROJETO + SLUG), indexada por CLAUDE_CODE_SESSION_ID.
+# Persiste pra que religacoes do /bus na mesma sessao nao redigitem.
+#   -Set <slug> [-Project <proj>]  -> grava (projeto default = 'default') e ecoa.
+#   (sem -Set)                      -> ecoa o registrado, ou 'NONE'.
+# Saida (quando registrado):
+#   PROJECT=<projeto>
+#   SLUG=<slug>
+#   BUS_CRON_MINUTE=<0-59>   (minuto aleatorio pro cron de auto-recheck; so usado no 1o arm)
+# Compat: arquivo antigo de 1 linha (so slug) e lido como projeto 'default'.
+# names/ fica SEMPRE na raiz BASE (registro global de quem e quem); o isolamento por
+# projeto acontece nas pastas de handoff (inbox/processing/done/rejected por projeto).
 
 param(
   [string]$Set = '',
+  [string]$Project = '',
   [string]$BusRoot = (Join-Path $env:TEMP 'claude-bus')
 )
 
@@ -17,13 +24,28 @@ $sid = $env:CLAUDE_CODE_SESSION_ID
 if (-not $sid) { $sid = 'unknown' }
 $f = Join-Path $dir ($sid + '.txt')
 
+function Emit([string]$proj, [string]$slug) {
+  Write-Output ('PROJECT=' + $proj)
+  Write-Output ('SLUG=' + $slug)
+  Write-Output ('BUS_CRON_MINUTE=' + (Get-Random -Minimum 0 -Maximum 60))
+}
+
 if ($Set -ne '') {
+  $proj = $Project.Trim(); if ($proj -eq '') { $proj = 'default' }
+  $slug = $Set.Trim()
   $enc = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($f, $Set.Trim(), $enc)
-  Write-Output $Set.Trim()
+  [System.IO.File]::WriteAllText($f, $proj + "`n" + $slug, $enc)
+  Emit $proj $slug
 } elseif (Test-Path -LiteralPath $f) {
-  $v = (Get-Content -LiteralPath $f -Raw -Encoding UTF8).Trim()
-  if ($v -ne '') { Write-Output $v } else { Write-Output 'NONE' }
+  $raw = (Get-Content -LiteralPath $f -Raw -Encoding UTF8)
+  $lines = @($raw -split "`r?`n")
+  if ($lines.Count -ge 2 -and $lines[1].Trim() -ne '') {
+    Emit $lines[0].Trim() $lines[1].Trim()
+  } elseif ($lines[0].Trim() -ne '') {
+    Emit 'default' $lines[0].Trim()   # compat: 1 linha = so slug, projeto default
+  } else {
+    Write-Output 'NONE'
+  }
 } else {
   Write-Output 'NONE'
 }

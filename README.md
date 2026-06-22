@@ -4,6 +4,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 
 **Modelo pull (sem monitor de fundo).** Você roda `/bus` numa sessão e ela processa na hora os handoffs pendentes pra ela. Quem envia termina com uma linha de despacho (`📨 Handoffs para: x, y, z`) dizendo onde rodar `/bus` em seguida. Versões anteriores usavam um monitor autônomo em background; ele foi removido — gastava token à toa e morria em silêncio quando o host matava o processo. Pull é simples, confiável e tem **custo ocioso zero**.
 
+- **Escopo de projeto** — `/bus <slug> [projeto]` isola cada frente; você só vê e endereça especialistas do mesmo projeto (omitido = `default`).
 - **Processamento on-demand** — `/bus` lê o inbox, valida o token, executa os handoffs e arquiva.
 - **Autenticação por token** — handoffs forjados vão pra quarentena (`rejected/`) antes de qualquer execução.
 - **Auto-nome por sessão** — define o slug 1× por sessão; religações são só `/bus`.
@@ -19,7 +20,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 
 ## Uso
 
-Em cada sessão que vai participar, rode **uma vez**: `/bus <slug>` (ex.: `/bus pd-nas`). Depois, religar/rechecar é só `/bus` (ele lembra o slug pela sessão).
+Em cada sessão que vai participar, rode **uma vez**: `/bus <slug> [projeto]` (ex.: `/bus pd-nas petadata`). O projeto isola o BUS — especialistas só veem/endereçam quem está no mesmo projeto (omitido = `default`). Depois, religar/rechecar é só `/bus` (ele lembra slug e projeto pela sessão).
 
 Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. O próprio `/bus` arma um recheck horário (cron de sessão, idempotente) que processa handoffs enquanto você está ausente.
 
@@ -34,14 +35,14 @@ Sem dependências: usa o PowerShell do Windows e o bash do macOS/Linux.
 
 ## Como funciona
 
-- **BUS** = pasta compartilhada entre as sessões: `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix). Override pela env `CLAUDE_BUS_ROOT`. Subpastas: `inbox/ processing/ done/ rejected/ names/`.
+- **BUS** = pasta compartilhada entre as sessões: base `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix), override pela env `CLAUDE_BUS_ROOT`. O projeto `default` usa a base; um projeto `<p>` usa `<base>/<p>/` (cada um com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O registro `names/` fica na base (global).
 - Cada handoff é um arquivo `to-<destino>__from-<origem>__<id>.handoff`, escrito atomicamente e com um token de auth.
 - `/bus` chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido).
 - Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o `/loop` ticar).
 
 ## Dashboard ao vivo (incluso)
 
-A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real: a **lista de despacho** (handoffs pendentes por destino — onde rodar `/bus`), handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, e os rejeitados por auth. É **estritamente somente leitura** sobre o BUS.
+A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real, com **seletor de projeto** (um projeto isolado, ou "Todos" agrupado): handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, e os rejeitados por auth. É **estritamente somente leitura** sobre o BUS.
 
 ```
 node dashboard/server.js   # http://localhost:7878 (porta via env PORT)
