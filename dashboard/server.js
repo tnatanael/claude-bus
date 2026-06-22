@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * BUS Live Dashboard : backend (owned by bus-demo-dev-backend).
+ * BUS Live Dashboard : backend.
  *
  * Node.js standard library only (http, fs, path). No npm, no framework, no build.
  * Run: `node server.js` -> HTTP server on http://localhost:7878

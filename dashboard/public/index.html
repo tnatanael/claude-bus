@@ -382,25 +382,25 @@ const POLL_MS = 1500;
 const API = "/api/state";
 let selectedProject = "all";
 
-// ---- MOCK fallback (used only until the real backend answers) ----
-// Mirrors the authoritative schema in ARCHITECTURE.md so the UI is demonstrable
-// while bus-demo-dev-backend builds server.js. Auto-disabled on first live hit.
+// ---- MOCK fallback (usado só até o backend real responder; auto-desativa no 1o hit) ----
+// Espelha o schema de projeto único do /api/state pra UI ser demonstravel offline.
 function mockState() {
   const now = Math.floor(Date.now() / 1000);
   return {
     now,
+    project: "demo",
     busRoot: "/tmp/claude-bus (MOCK)",
     handoffs: {
       inbox: [
-        { id: "20260617-132906-f4db92", from: "bus-demo-po", to: "bus-demo-arquitect", replyRequired: false, inReplyTo: "20260617-132752-5bc55a" }
+        { id: "20260617-132906-f4db92", from: "po", to: "architect", replyRequired: false, inReplyTo: "20260617-132752-5bc55a" }
       ],
       processing: [
-        { id: "20260617-132901-aa1234", from: "bus-demo-po", to: "bus-demo-dev-backend", replyRequired: true, inReplyTo: "" }
+        { id: "20260617-132901-aa1234", from: "po", to: "backend", replyRequired: true, inReplyTo: "" }
       ],
       done: [
-        { id: "20260617-132752-5bc55a", from: "bus-demo-arquitect", to: "bus-demo-po", replyRequired: true, inReplyTo: "" },
-        { id: "20260617-132218-a02fcc", from: "bus-demo-dev-frontend", to: "bus-demo-arquitect", replyRequired: false, inReplyTo: "20260617-132133-d3da33" },
-        { id: "20260617-132133-d3da33", from: "bus-demo-arquitect", to: "bus-demo-dev-frontend", replyRequired: true, inReplyTo: "" }
+        { id: "20260617-132752-5bc55a", from: "architect", to: "po", replyRequired: true, inReplyTo: "" },
+        { id: "20260617-132218-a02fcc", from: "frontend", to: "architect", replyRequired: false, inReplyTo: "20260617-132133-d3da33" },
+        { id: "20260617-132133-d3da33", from: "architect", to: "frontend", replyRequired: true, inReplyTo: "" }
       ],
       rejected: []
     },

@@ -38,7 +38,7 @@ Sem dependências: usa o PowerShell do Windows e o bash do macOS/Linux.
 - **BUS** = pasta compartilhada entre as sessões: base `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix), override pela env `CLAUDE_BUS_ROOT`. O projeto `default` usa a base; um projeto `<p>` usa `<base>/<p>/` (cada um com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O registro `names/` fica na base (global).
 - Cada handoff é um arquivo `to-<destino>__from-<origem>__<id>.handoff`, escrito atomicamente e com um token de auth.
 - `/bus` chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido).
-- Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o `/loop` ticar).
+- Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o cron horário de auto-recheck ticar).
 
 ## Dashboard ao vivo (incluso)
 
