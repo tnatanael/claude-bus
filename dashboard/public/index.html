@@ -315,6 +315,10 @@
   .section-proj { color: var(--muted); font-family: var(--mono); font-size: 12px; }
   .proj-flow { margin-bottom: 22px; }
   #allSection .section-title { margin-top: 10px; }
+  .specs { margin: 4px 0 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .specs-label { font-size: 11px; color: var(--muted); }
+  .spec-chip { font-family: var(--mono); font-size: 11px; color: var(--text); background: rgba(88,166,255,0.12); border: 1px solid rgba(88,166,255,0.35); border-radius: 10px; padding: 2px 8px; }
+  .specs-empty { font-size: 11px; color: var(--muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -333,6 +337,7 @@
   <section id="allSection"></section>
   <section id="singleSection" style="display:none">
     <div class="section-title">Handoff Flow <span class="section-proj" id="singleProj"></span> <span class="hint">inbox = pendentes (rode /bus no destino) · setas = vínculo de resposta</span></div>
+    <div class="specs" id="singleSpecs"></div>
     <div id="flowArea">
       <svg id="connectors" aria-hidden="true">
         <defs>
@@ -477,6 +482,12 @@ function handoffCard(it, idSet) {
     </div>`;
 }
 
+// Chips dos especialistas registrados num projeto (do roster names/).
+function specsHtml(specs) {
+  if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
+  return specs.map(s => `<span class="spec-chip">${esc(s)}</span>`).join("");
+}
+
 // Visão agrupada "Todos": uma seção por projeto (colunas simples, sem conectores).
 function renderAll(projects) {
   const wrap = document.getElementById("allSection");
@@ -491,6 +502,7 @@ function renderAll(projects) {
     const c = p.counts || {};
     return `
       <div class="section-title">📦 ${esc(p.project)} <span class="hint">inbox ${c.inbox||0} · processing ${c.processing||0} · done ${c.done||0} · rejected ${c.rejected||0}</span></div>
+      <div class="specs"><span class="specs-label">especialistas:</span> ${specsHtml(p.specialists)}</div>
       <div class="flow proj-flow">
         ${col('Inbox', h.inbox, 'inbox')}
         ${col('Processing', h.processing, 'processing')}
@@ -657,7 +669,7 @@ function render(state) {
     all.style.display = "";
     document.getElementById("busRoot").textContent = "(todos os projetos)";
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
-      [p.project, ["inbox","processing","done","rejected"].map(k => (p.handoffs[k]||[]).map(it => it.id).join(","))]));
+      [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k => (p.handoffs[k]||[]).map(it => it.id).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     return;
   }
@@ -668,6 +680,8 @@ function render(state) {
   document.getElementById("busRoot").textContent = state.busRoot || "?";
   const sp = document.getElementById("singleProj");
   if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
+  const ss = document.getElementById("singleSpecs");
+  if (ss) ss.innerHTML = '<span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
   const sig = "ONE|" + (state.project || "") + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));

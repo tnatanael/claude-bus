@@ -35,6 +35,7 @@ Sempre inclui `default`.
   "now": 1719000000,
   "project": "petadata",
   "busRoot": "<raiz do projeto>",
+  "specialists": ["pd-e2e", "pd-portal", "..."],
   "handoffs": { "inbox": [], "processing": [], "done": [], "rejected": [] },
   "counts": { "inbox": 0, "processing": 0, "done": 4, "rejected": 0 }
 }
@@ -42,8 +43,9 @@ Sempre inclui `default`.
 **Agrupado** (`project=all`):
 ```json
 { "now": 1719000000, "all": true,
-  "projects": [ { "project": "default", "handoffs": {}, "counts": {} }, "..." ] }
+  "projects": [ { "project": "default", "specialists": [], "handoffs": {}, "counts": {} }, "..." ] }
 ```
+`specialists`: slugs registrados no projeto (lidos do `names/`, agrupados por projeto).
 Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do arquivo
 `to-<to>__from-<from>__<id>.handoff` e do cabeçalho do corpo. Ordem: mais novo primeiro
 (o `id` é `YYYYMMDD-HHMMSS-xxxxxx`). O `done` já vem filtrado (24h, máx 20).

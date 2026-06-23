@@ -145,17 +145,37 @@ function projectRoot(p) {
 }
 
 const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names', 'presence', 'state']);
-// Projects: always 'default' + every base subdir that isn't a reserved handoff/registry
-// folder or a dotfile. Auto-discovered from the filesystem (read only).
+
+// names/<sid>.txt = 2 linhas (projeto, slug). Roster: projeto -> [slug] ordenado.
+// (compat: arquivo de 1 linha = projeto 'default'.)
+function readRoster() {
+  const roster = {};
+  for (const f of safeReaddir(path.join(BUS_ROOT, 'names'))) {
+    if (!f.endsWith('.txt')) continue;
+    const lines = (safeReadText(path.join(BUS_ROOT, 'names', f)) || '').split(/\r?\n/);
+    let proj = '', slug = '';
+    if (lines.length >= 2 && lines[1].trim() !== '') { proj = lines[0].trim(); slug = lines[1].trim(); }
+    else if ((lines[0] || '').trim() !== '') { proj = 'default'; slug = lines[0].trim(); }
+    else continue;
+    if (!proj) proj = 'default';
+    (roster[proj] = roster[proj] || []).push(slug);
+  }
+  for (const p of Object.keys(roster)) roster[p].sort();
+  return roster;
+}
+
+// Projects: 'default' + base subdirs (nao reservadas/dotfiles) + projetos do roster.
 function listProjects() {
-  const projs = ['default'];
+  const set = new Set();
   for (const name of safeReaddir(BUS_ROOT)) {
     if (RESERVED_DIRS.has(name) || name.startsWith('.')) continue;
     let isDir = false;
     try { isDir = fs.statSync(path.join(BUS_ROOT, name)).isDirectory(); } catch (_) {}
-    if (isDir) projs.push(name);
+    if (isDir) set.add(name);
   }
-  return projs;
+  for (const p of Object.keys(readRoster())) set.add(p);
+  set.delete('default');
+  return ['default', ...[...set].sort()];
 }
 
 function queryParam(reqUrl, key) {
@@ -173,16 +193,18 @@ function queryParam(reqUrl, key) {
 // project=<p>   -> single  { now, project, busRoot, handoffs, counts }
 function buildPayload(p) {
   p = p || 'all';
+  const roster = readRoster();
   if (p === 'all') {
     const now = Math.floor(Date.now() / 1000);
     const projects = listProjects().map(name => {
       const st = buildState(projectRoot(name));
-      return { project: name, handoffs: st.handoffs, counts: st.counts };
+      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts };
     });
     return { now, all: true, projects };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
+  st.specialists = roster[p] || [];
   return st;
 }
 
