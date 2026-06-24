@@ -24,7 +24,7 @@ presence state`) nem dotfiles, mais o `default`.
 
 ### `GET /api/projects`
 ```json
-{ "projects": ["default", "petadata", "..."] }
+{ "projects": ["default", "acme", "..."] }
 ```
 Sempre inclui `default`.
 
@@ -33,9 +33,9 @@ Sempre inclui `default`.
 ```json
 {
   "now": 1719000000,
-  "project": "petadata",
+  "project": "acme",
   "busRoot": "<raiz do projeto>",
-  "specialists": [{ "slug": "pd-portal", "cron": 11, "armed": true }, "..."],
+  "specialists": [{ "slug": "frontend", "cron": 11, "armed": true }, "..."],
   "handoffs": { "inbox": [], "processing": [], "done": [], "rejected": [] },
   "counts": { "inbox": 0, "processing": 0, "done": 4, "rejected": 0 }
 }

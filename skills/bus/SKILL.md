@@ -1,6 +1,6 @@
 ---
 name: bus
-description: Comunicacao assincrona entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO. Invoque com /bus <slug> [projeto] (ex: /bus pd-nas petadata): a sessao entra no BUS daquele projeto, processa os handoffs pendentes pra ela e ensina a enviar/devolver. Projeto omitido = 'default'. Modelo pull (sem monitor). Cross-platform: Windows (PowerShell) e macOS/Linux (bash).
+description: Comunicacao assincrona entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO. Invoque com /bus <slug> [projeto] (ex: /bus backend acme): a sessao entra no BUS daquele projeto, processa os handoffs pendentes pra ela e ensina a enviar/devolver. Projeto omitido = 'default'. Modelo pull (sem monitor). Cross-platform: Windows (PowerShell) e macOS/Linux (bash).
 ---
 
 # BUS — handoffs assíncronos entre especialistas (modelo pull, por projeto)
