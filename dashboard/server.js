@@ -19,12 +19,15 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = Number(process.env.PORT) || 7878;
-const BUS_ROOT = process.env.CLAUDE_BUS_ROOT || '/tmp/claude-bus';
+// Default cross-platform: <temp do SO>/claude-bus (Windows: %TEMP%, Unix: /tmp) —
+// casa com os scripts (.ps1 usam %TEMP%, .sh usam /tmp). Override via CLAUDE_BUS_ROOT.
+const BUS_ROOT = process.env.CLAUDE_BUS_ROOT || path.join(require('os').tmpdir(), 'claude-bus');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];
 const DONE_MAX_AGE_SEC = 24 * 3600; // done view: hide handoffs older than 24h
 const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newest first)
+const SEEN_ARMED_MAX_SEC = 90 * 60; // chip "armado": /bus visto nos ultimos 90min (cron horario + folga p/ jitter e sessao ocupada)
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -144,7 +147,7 @@ function projectRoot(p) {
   return (!p || p === 'default') ? BUS_ROOT : path.join(BUS_ROOT, p);
 }
 
-const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names', 'presence', 'state']);
+const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names', 'presence', 'state', 'seen']);
 
 // Minuto do cron de uma sessao = soma dos bytes do sid mod 60 (mesmo calculo do
 // bus-name), pro countdown do dashboard bater com o minuto realmente armado.
@@ -167,7 +170,14 @@ function readRoster() {
     else if ((lines[0] || '').trim() !== '') { proj = 'default'; slug = lines[0].trim(); }
     else continue;
     if (!proj) proj = 'default';
-    (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid) });
+    // armed = o /bus desta sessao foi visto recentemente (seen/<sid>); como o cron
+    // dispara /bus de hora em hora, frescor => cron realmente armado/vivo.
+    let armed = false;
+    try {
+      const st = fs.statSync(path.join(BUS_ROOT, 'seen', sid));
+      armed = (Math.floor(Date.now() / 1000) - Math.floor(st.mtimeMs / 1000)) <= SEEN_ARMED_MAX_SEC;
+    } catch (_) {}
+    (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid), armed });
   }
   for (const p of Object.keys(roster)) roster[p].sort((a, b) => a.slug.localeCompare(b.slug));
   return roster;

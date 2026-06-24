@@ -320,6 +320,10 @@
   .spec-chip { font-family: var(--mono); font-size: 11px; color: var(--text); background: rgba(88,166,255,0.12); border: 1px solid rgba(88,166,255,0.35); border-radius: 10px; padding: 2px 8px; }
   .specs-empty { font-size: 11px; color: var(--muted); font-style: italic; }
   .eta { font-family: var(--mono); font-size: 10px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.35); border-radius: 6px; padding: 1px 6px; }
+  .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
+  .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .arm-dot.armed { background: var(--green); }
+  .arm-dot.cold { background: var(--grey); }
 </style>
 </head>
 <body>
@@ -460,6 +464,13 @@ function buildIdSet(h) {
   return set;
 }
 
+// Epoch (ms, hora local) do timestamp do id (YYYYMMDD-HHMMSS). null se nao casar.
+function idToEpoch(id) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id || "");
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+}
+
 function handoffCard(it, idSet) {
   const replyTag = it.replyRequired ? '<span class="tag reply">reply required</span>' : "";
   const parentPresent = it.inReplyTo && idSet && idSet.has(it.inReplyTo);
@@ -472,7 +483,7 @@ function handoffCard(it, idSet) {
   const replyTo = it.inReplyTo ? esc(it.inReplyTo) : "";
   const linkable = (it.inReplyTo && parentPresent) ? " linkable" : "";
   // Countdown ate o destino pegar o handoff (so no inbox: o server so anexa toCron la).
-  const etaTag = (it.toCron === 0 || it.toCron) ? `<span class="eta" data-cron="${it.toCron}" data-to="${esc(it.to)}"></span>` : "";
+  const etaTag = (it.toCron === 0 || it.toCron) ? `<span class="eta" data-cron="${it.toCron}" data-to="${esc(it.to)}" data-sent="${idToEpoch(it.id)}"></span>` : "";
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}">
       <div class="route">
@@ -490,24 +501,49 @@ function specsHtml(specs) {
   if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
   return specs.map(s => {
     const slug = (typeof s === "string") ? s : s.slug;
-    return `<span class="spec-chip">${esc(slug)}</span>`;
+    const armed = (s && typeof s === "object") ? !!s.armed : false;
+    const dotCls = armed ? "armed" : "cold";
+    const tip = armed
+      ? "cron de auto-recheck armado e ativo (rodou /bus na última ~1h)"
+      : "cron não confirmado na última ~1h — a sessão pode estar fechada ou o cron parado; rode /bus nela";
+    return `<span class="spec-chip" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}</span>`;
   }).join("");
 }
 
 // Countdown ("~Nm") ate o proximo tique do cron de cada especialista. O minuto vem
 // do roster (deterministico do sid); o cron dispara nesse minuto de cada hora.
 function updateEtas() {
-  const now = new Date();
-  const secNow = now.getMinutes() * 60 + now.getSeconds();
+  const nowMs = Date.now();
+  const now = new Date(nowMs);
+  const TOL = 5 * 60 * 1000;   // tolerancia de 5 min depois do tique esperado
   document.querySelectorAll(".eta[data-cron]").forEach(el => {
     const cron = parseInt(el.getAttribute("data-cron"), 10);
     if (isNaN(cron)) return;
-    let diff = cron * 60 - secNow;
-    if (diff <= 0) diff += 3600;
-    const mins = Math.ceil(diff / 60);
     const to = el.getAttribute("data-to") || "destino";
-    el.textContent = "⏱ ~" + mins + "m";
-    el.title = to + " processa no minuto :" + String(cron).padStart(2, "0") + " de cada hora (~" + mins + " min, se a sessão estiver aberta)";
+    const mm = String(cron).padStart(2, "0");
+    const sent = parseInt(el.getAttribute("data-sent"), 10);
+    // pickup esperado = primeiro :cron em/apos o envio do handoff
+    let expected = null;
+    if (!isNaN(sent)) {
+      const d = new Date(sent); d.setSeconds(0, 0);
+      if (d.getMinutes() <= cron) d.setMinutes(cron);
+      else { d.setHours(d.getHours() + 1); d.setMinutes(cron); }
+      expected = d.getTime();
+    }
+    if (expected != null && nowMs > expected + TOL) {
+      // passou do tique esperado + 5min e ainda esta no inbox => atrasado
+      const lateMin = Math.floor((nowMs - expected) / 60000);
+      el.textContent = "⚠ atrasado " + lateMin + "m";
+      el.classList.add("late");
+      el.title = to + " devia ter pego no minuto :" + mm + " (~" + lateMin + " min atrás) e não pegou. O cron do destino pode estar parado — rode /bus nele.";
+    } else {
+      let remain;
+      if (expected != null) remain = Math.max(0, Math.ceil((expected - nowMs) / 60000));
+      else { let diff = cron * 60 - (now.getMinutes() * 60 + now.getSeconds()); if (diff <= 0) diff += 3600; remain = Math.ceil(diff / 60); }
+      el.textContent = "⏱ ~" + remain + "m";
+      el.classList.remove("late");
+      el.title = to + " processa no minuto :" + mm + " (~" + remain + " min, se a sessão estiver aberta)";
+    }
   });
 }
 

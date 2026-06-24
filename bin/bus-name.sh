@@ -10,6 +10,11 @@ sid="${CLAUDE_CODE_SESSION_ID:-}"
 dir="$bus_root/names"; mkdir -p "$dir"
 f="$dir/$sid.txt"
 
+# "visto por ultimo": todo /bus passa por aqui -> regrava. O dashboard usa o frescor
+# pra inferir se o cron da sessao esta REALMENTE armado (cron dispara /bus de hora em hora).
+seen_dir="$bus_root/seen"; mkdir -p "$seen_dir"
+date +%s > "$seen_dir/$sid"
+
 # minuto do cron DETERMINISTICO por sessao = soma dos bytes do sid mod 60 (bate com
 # o dashboard, que calcula do sid). Estavel entre chamadas; ainda espalha as sessoes.
 cronmin=0; i=0

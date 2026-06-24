@@ -35,7 +35,7 @@ Sempre inclui `default`.
   "now": 1719000000,
   "project": "petadata",
   "busRoot": "<raiz do projeto>",
-  "specialists": [{ "slug": "pd-portal", "cron": 11 }, "..."],
+  "specialists": [{ "slug": "pd-portal", "cron": 11, "armed": true }, "..."],
   "handoffs": { "inbox": [], "processing": [], "done": [], "rejected": [] },
   "counts": { "inbox": 0, "processing": 0, "done": 4, "rejected": 0 }
 }
@@ -45,7 +45,7 @@ Sempre inclui `default`.
 { "now": 1719000000, "all": true,
   "projects": [ { "project": "default", "specialists": [], "handoffs": {}, "counts": {} }, "..." ] }
 ```
-`specialists`: especialistas do projeto, cada um `{ slug, cron }` (`cron` = minuto 0-59 do auto-recheck, **determinístico do sid** = soma dos bytes do sid mod 60; o front mostra o countdown até o próximo tique). Lidos do `names/`.
+`specialists`: especialistas do projeto, cada um `{ slug, cron, armed }`. `cron` = minuto 0-59 do auto-recheck, **determinístico do sid** (soma dos bytes do sid mod 60). `armed` = o `/bus` da sessão foi visto nos últimos 90min (marcador `seen/<sid>`, regravado a cada `/bus`; como o cron dispara `/bus` de hora em hora, frescor ⇒ cron vivo). Lidos do `names/` + `seen/`. Os itens do `inbox` carregam `toCron` (cron do destino) pro countdown/atraso no card.
 Os itens do `inbox` ainda trazem `toCron` (minuto do cron do destino), que o front usa pro countdown `⏱ ~Nm` no card.
 Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do arquivo
 `to-<to>__from-<from>__<id>.handoff` e do cabeçalho do corpo. Ordem: mais novo primeiro
