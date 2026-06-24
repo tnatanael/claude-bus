@@ -5,16 +5,21 @@
 #   BUS_FILE=<caminho> / BUS_BODY_BEGIN / <corpo> / BUS_BODY_END
 # Nada pendente: BUS_EMPTY. Sem polling, sem background -- substitui o monitor no pull.
 set -u
-me=""
-bus_root="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
+me=""; project=""; bus_root=""
+base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --me|-Me) me="$2"; shift 2;;
+    --project) project="$2"; shift 2;;
     --bus-root) bus_root="$2"; shift 2;;
     *) shift;;
   esac
 done
-[ -n "$me" ] || { echo "uso: bus-inbox.sh --me SLUG" >&2; exit 1; }
+[ -n "$me" ] || { echo "uso: bus-inbox.sh --me SLUG [--project P]" >&2; exit 1; }
+# Raiz: --bus-root explicito vence; senao base + projeto (subpasta, exceto 'default').
+if [ -z "$bus_root" ]; then
+  if [ -n "$project" ] && [ "$project" != "default" ]; then bus_root="$base/$project"; else bus_root="$base"; fi
+fi
 
 inbox="$bus_root/inbox"; rejected="$bus_root/rejected"
 mkdir -p "$inbox"

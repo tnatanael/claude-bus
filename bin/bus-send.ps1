@@ -17,8 +17,17 @@ param(
   [string]$BodyFile = '',
   [switch]$ReplyRequired,
   [string]$InReplyTo = '',
-  [string]$BusRoot = (Join-Path $env:TEMP 'claude-bus')
+  [string]$Project = '',
+  [string]$BusRoot = ''
 )
+# Raiz do projeto resolvida AQUI (-Project), pra o agente nunca montar caminho com
+# %TEMP%/$env:TEMP (quebra via Bash). -BusRoot explicito vence.
+if ($BusRoot -eq '') {
+  $base = $env:CLAUDE_BUS_ROOT
+  if (-not $base) { $base = Join-Path $env:TEMP 'claude-bus' }
+  if ($Project -ne '' -and $Project -ne 'default') { $BusRoot = Join-Path $base $Project }
+  else { $BusRoot = $base }
+}
 
 function Get-BusSecret([string]$root) {
   New-Item -ItemType Directory -Force -Path $root | Out-Null

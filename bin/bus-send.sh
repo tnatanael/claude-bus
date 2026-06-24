@@ -3,8 +3,8 @@
 # Par Unix do bus-send.ps1: escreve um handoff com escrita atomica (tmp + mv) e token
 # de auth. NAO TESTADO no Unix ainda -- validar.
 set -u
-bus_root="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
-to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""
+base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
+to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --to) to="$2"; shift 2;;
@@ -13,10 +13,15 @@ while [ $# -gt 0 ]; do
     --body-file) bodyfile="$2"; shift 2;;
     --reply) reply="true"; shift;;
     --in-reply-to) inreply="$2"; shift 2;;
+    --project) project="$2"; shift 2;;
     --bus-root) bus_root="$2"; shift 2;;
     *) shift;;
   esac
 done
+# Raiz: --bus-root explicito vence; senao base + projeto (subpasta, exceto 'default').
+if [ -z "$bus_root" ]; then
+  if [ -n "$project" ] && [ "$project" != "default" ]; then bus_root="$base/$project"; else bus_root="$base"; fi
+fi
 
 [ -n "$to" ] && [ -n "$from" ] || { echo "uso: bus-send.sh --to X --from Y (--body-file F | --body ...) [--reply] [--in-reply-to ID]" >&2; exit 1; }
 [ -n "$bodyfile" ] && [ -f "$bodyfile" ] && body="$(cat "$bodyfile")"

@@ -18,11 +18,11 @@ Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude C
 |---|---|---|
 | **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Set <slug> -Project <proj>` | `bash "$ROOT/bin/bus-name.sh" <slug> <proj>` |
 | **nome — ler** | `PS "$ROOT\bin\bus-name.ps1"` | `bash "$ROOT/bin/bus-name.sh"` |
-| **ler inbox** | `PS "$ROOT\bin\bus-inbox.ps1" -Me <slug> -BusRoot "<RAIZ>"` | `bash "$ROOT/bin/bus-inbox.sh" --me <slug> --bus-root "<RAIZ>"` |
-| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -BusRoot "<RAIZ>" [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --bus-root "<RAIZ>" [--reply] [--in-reply-to <id>]` |
+| **ler inbox** | `PS "$ROOT\bin\bus-inbox.ps1" -Me <slug> -Project <proj>` | `bash "$ROOT/bin/bus-inbox.sh" --me <slug> --project <proj>` |
+| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <proj> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <proj> [--reply] [--in-reply-to <id>]` |
 
-**Base do BUS:** Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_ROOT`).
-**RAIZ do projeto:** `default` → a própria base; `<p>` → `<base>/<p>` (cada projeto com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O `names/` (registro de quem-é-quem) fica **na base**, global. `bus-name` sempre usa a base; `bus-inbox`/`bus-send` recebem a `<RAIZ>` do projeto.
+**Base do BUS:** Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_ROOT`). Cada projeto é uma subpasta: `default` = a base; `<p>` = `<base>/<p>` (com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O `names/` (registro) fica na base, global.
+> **Passe o projeto via `-Project`/`--project <proj>`** — os scripts resolvem a pasta sozinhos. **NUNCA monte caminho com `%TEMP%`/`$env:TEMP`** pra passar pros scripts (quebra se rodar pela ferramenta Bash — a variável não expande). `bus-name` usa sempre a base; `bus-inbox`/`bus-send` recebem o projeto.
 
 ## 0. Pré-requisito
 Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (ambos nativos).
@@ -30,18 +30,18 @@ Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (a
 ## 1. Quem você é (projeto + slug)
 1. **Veio slug** (1º arg após `/bus`) → grave (2º arg = projeto; omitido = `default`) via *nome — gravar*.
 2. **Veio vazio** → *nome — ler*: retornou `PROJECT=/SLUG=/BUS_CRON_MINUTE=` → use direto (religação); `NONE` → **pergunte** o slug (e projeto) e grave.
-Guarde **SLUG**, **PROJECT** e **BUS_CRON_MINUTE**. Defina a **RAIZ** (base se `default`, senão `<base>/<projeto>`).
+Guarde **SLUG**, **PROJECT** e **BUS_CRON_MINUTE**. Passe o `PROJECT` aos comandos via `-Project`/`--project` (nada de caminho manual).
 
 ## 2. O que o /bus faz
-1. Resolva projeto+slug e a **RAIZ** (seção 1). Guarde o `BUS_CRON_MINUTE`.
+1. Resolva projeto+slug (seção 1). Guarde o `BUS_CRON_MINUTE`.
 2. **ARME O CRON — SEMPRE, MESMO COM INBOX VAZIO. NÃO PULE.** As ferramentas `CronList`/`CronCreate` são **deferidas**: rode `ToolSearch select:CronList,CronCreate` ANTES. Chame `CronList`; se já há job com prompt `/bus`, não faça nada; senão `CronCreate(cron: "<BUS_CRON_MINUTE> * * * *", prompt: "/bus", recurring: true)`. Minuto aleatório por sessão (evita rate limit); NÃO use fixo.
-3. Rode *ler inbox* (com `--bus-root`/`-BusRoot` da RAIZ). Saída = blocos `BUS_FILE / BUS_BODY_BEGIN / <corpo> / BUS_BODY_END`, ou `BUS_EMPTY`. Token já validado; forjados foram pra `rejected/`.
-4. Para **cada** bloco: **mova** o arquivo pra `<RAIZ>/processing/` (claim) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** → execute → **mova** pra `<RAIZ>/done/` → se `reply_required`, **devolva** (*enviar*, com a RAIZ e `--in-reply-to`/`-InReplyTo`).
-5. **Drene:** rode *ler inbox* de novo (mesma RAIZ); chegou algo novo? processe e **repita até `BUS_EMPTY`** — não espere o cron.
+3. Rode *ler inbox* (com `--project`/`-Project`). Saída = blocos `BUS_FILE / BUS_BODY_BEGIN / <corpo> / BUS_BODY_END`, ou `BUS_EMPTY`. Token já validado; forjados foram pra `rejected/`.
+4. Para **cada** bloco: **mova** o arquivo pra a subpasta `processing/` (troque `/inbox/` por `/processing/` no caminho do `BUS_FILE`, que é absoluto) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** → execute → **mova** pra `done/` → se `reply_required`, **devolva** (*enviar*, com `--project` e `--in-reply-to`/`-InReplyTo`).
+5. **Drene:** rode *ler inbox* de novo (mesmo `--project`); chegou algo novo? processe e **repita até `BUS_EMPTY`** — não espere o cron.
 6. `BUS_EMPTY` e nada a processar → avise "nenhum handoff pendente" (o cron do passo 2 já tem que estar armado).
 
 ## 3. Enviar ou devolver
-Escreva o corpo num arquivo temp com a ferramenta **Write**, rode *enviar* com `--body-file`/`-BodyFile` **e a RAIZ do projeto**. **Destino tem que ser do MESMO projeto** (mesma raiz). **Corpo auto-contido** (objetivo, caminhos, critério de pronto, se precisa de retorno).
+Escreva o corpo num arquivo temp com a ferramenta **Write**, rode *enviar* com `--body-file`/`-BodyFile` **e `--project`/`-Project`**. **Destino tem que ser do MESMO projeto.** **Corpo auto-contido** (objetivo, caminhos, critério de pronto, se precisa de retorno).
 **SEMPRE que enviar, termine o turno com a LINHA DE DESPACHO:** 📨 **Handoffs para: x, y, z** — rode `/bus` nesses chats.
 
 ## 4. Endereçamento

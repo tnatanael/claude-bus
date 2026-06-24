@@ -10,8 +10,19 @@
 # substitui o antigo monitor no modelo pull (o /bus chama isto uma vez e processa).
 param(
   [Parameter(Mandatory=$true)][string]$Me,
-  [string]$BusRoot = (Join-Path $env:TEMP 'claude-bus')
+  [string]$Project = '',
+  [string]$BusRoot = ''
 )
+# Raiz do projeto resolvida AQUI (nao pelo agente): -BusRoot explicito vence; senao
+# base (CLAUDE_BUS_ROOT ou %TEMP%\claude-bus) + o projeto como subpasta (exceto
+# 'default'). Assim o agente passa so -Project <nome> e nunca monta caminho com
+# %TEMP%/$env:TEMP -- que quebra se o comando rodar via Bash.
+if ($BusRoot -eq '') {
+  $base = $env:CLAUDE_BUS_ROOT
+  if (-not $base) { $base = Join-Path $env:TEMP 'claude-bus' }
+  if ($Project -ne '' -and $Project -ne 'default') { $BusRoot = Join-Path $base $Project }
+  else { $BusRoot = $base }
+}
 # UTF-8 no stdout: senao o PS 5.1 corrompe acentos do corpo na captura do harness.
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
