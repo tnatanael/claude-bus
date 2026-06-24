@@ -10,7 +10,12 @@ sid="${CLAUDE_CODE_SESSION_ID:-}"
 dir="$bus_root/names"; mkdir -p "$dir"
 f="$dir/$sid.txt"
 
-emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$((RANDOM % 60))"; }
+# minuto do cron DETERMINISTICO por sessao = soma dos bytes do sid mod 60 (bate com
+# o dashboard, que calcula do sid). Estavel entre chamadas; ainda espalha as sessoes.
+cronmin=0; i=0
+while [ "$i" -lt "${#sid}" ]; do c=$(printf '%d' "'${sid:$i:1}"); cronmin=$((cronmin + c)); i=$((i + 1)); done
+cronmin=$((cronmin % 60))
+emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$cronmin"; }
 
 if [ -n "${1:-}" ]; then
   proj="${2:-default}"; [ -z "$proj" ] && proj="default"

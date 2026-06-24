@@ -319,6 +319,7 @@
   .specs-label { font-size: 11px; color: var(--muted); }
   .spec-chip { font-family: var(--mono); font-size: 11px; color: var(--text); background: rgba(88,166,255,0.12); border: 1px solid rgba(88,166,255,0.35); border-radius: 10px; padding: 2px 8px; }
   .specs-empty { font-size: 11px; color: var(--muted); font-style: italic; }
+  .spec-eta { color: var(--muted); font-size: 10px; }
 </style>
 </head>
 <body>
@@ -485,7 +486,28 @@ function handoffCard(it, idSet) {
 // Chips dos especialistas registrados num projeto (do roster names/).
 function specsHtml(specs) {
   if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
-  return specs.map(s => `<span class="spec-chip">${esc(s)}</span>`).join("");
+  return specs.map(s => {
+    const slug = (typeof s === "string") ? s : s.slug;
+    const cron = (s && typeof s === "object" && (s.cron === 0 || s.cron)) ? s.cron : null;
+    const eta = (cron != null) ? ` <span class="spec-eta" data-cron="${cron}"></span>` : "";
+    return `<span class="spec-chip">${esc(slug)}${eta}</span>`;
+  }).join("");
+}
+
+// Countdown ("~Nm") ate o proximo tique do cron de cada especialista. O minuto vem
+// do roster (deterministico do sid); o cron dispara nesse minuto de cada hora.
+function updateEtas() {
+  const now = new Date();
+  const secNow = now.getMinutes() * 60 + now.getSeconds();
+  document.querySelectorAll(".spec-eta[data-cron]").forEach(el => {
+    const cron = parseInt(el.getAttribute("data-cron"), 10);
+    if (isNaN(cron)) return;
+    let diff = cron * 60 - secNow;
+    if (diff <= 0) diff += 3600;
+    const mins = Math.ceil(diff / 60);
+    el.textContent = "· ~" + mins + "m";
+    el.title = "auto-recheck no minuto :" + String(cron).padStart(2, "0") + " de cada hora (~" + mins + " min, se a sessão estiver aberta)";
+  });
 }
 
 // Visão agrupada "Todos": uma seção por projeto (colunas simples, sem conectores).
@@ -671,6 +693,7 @@ function render(state) {
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
       [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k => (p.handoffs[k]||[]).map(it => it.id).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
+    updateEtas();
     return;
   }
 
@@ -682,6 +705,7 @@ function render(state) {
   if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
   const ss = document.getElementById("singleSpecs");
   if (ss) ss.innerHTML = '<span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
+  updateEtas();
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
   const sig = "ONE|" + (state.project || "") + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
@@ -742,6 +766,7 @@ loadProjects();
 tick();
 setInterval(tick, POLL_MS);
 setInterval(loadProjects, 15000);   // descobre projetos novos periodicamente
+setInterval(updateEtas, 15000);     // mantem o countdown vivo mesmo sem poll novo
 </script>
 </body>
 </html>

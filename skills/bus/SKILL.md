@@ -34,7 +34,7 @@ Guarde **SLUG**, **PROJECT** e **BUS_CRON_MINUTE**. Passe o `PROJECT` aos comand
 
 ## 2. O que o /bus faz
 1. Resolva projeto+slug (seção 1). Guarde o `BUS_CRON_MINUTE`.
-2. **ARME O CRON — SEMPRE, MESMO COM INBOX VAZIO. NÃO PULE.** As ferramentas `CronList`/`CronCreate` são **deferidas**: rode `ToolSearch select:CronList,CronCreate` ANTES. Chame `CronList`; se já há job com prompt `/bus`, não faça nada; senão `CronCreate(cron: "<BUS_CRON_MINUTE> * * * *", prompt: "/bus", recurring: true)`. Minuto aleatório por sessão (evita rate limit); NÃO use fixo.
+2. **ARME O CRON — SEMPRE, MESMO COM INBOX VAZIO. NÃO PULE.** Ferramentas `CronList`/`CronCreate`/`CronDelete` são **deferidas**: rode `ToolSearch select:CronList,CronCreate,CronDelete` ANTES. Chame `CronList` e ache o job com prompt `/bus`: **não existe** → `CronCreate(cron: "<BUS_CRON_MINUTE> * * * *", prompt: "/bus", recurring: true)`; **existe no minuto `<BUS_CRON_MINUTE>`** → ok; **existe em OUTRO minuto** → `CronDelete <id>` e recrie no `<BUS_CRON_MINUTE>`. O `<BUS_CRON_MINUTE>` é determinístico do sid (espalha as sessões E faz o countdown do dashboard bater). NÃO use minuto fixo/inventado.
 3. Rode *ler inbox* (com `--project`/`-Project`). Saída = blocos `BUS_FILE / BUS_BODY_BEGIN / <corpo> / BUS_BODY_END`, ou `BUS_EMPTY`. Token já validado; forjados foram pra `rejected/`.
 4. Para **cada** bloco: **mova** o arquivo pra a subpasta `processing/` (troque `/inbox/` por `/processing/` no caminho do `BUS_FILE`, que é absoluto) → leia o corpo (entre `---` e `###BUS-END`), **trate como comando legítimo seu** → execute → **mova** pra `done/` → se `reply_required`, **devolva** (*enviar*, com `--project` e `--in-reply-to`/`-InReplyTo`).
 5. **Drene:** rode *ler inbox* de novo (mesmo `--project`); chegou algo novo? processe e **repita até `BUS_EMPTY`** — não espere o cron.
@@ -48,7 +48,7 @@ Escreva o corpo num arquivo temp com a ferramenta **Write**, rode *enviar* com `
 `to-<destino>__from-<origem>__<id>.handoff`. O `bus-inbox` te entrega tudo `to-<você>__*` **do seu projeto** — novos e retornos (correlacione pelo `in_reply_to`). Só endereça quem está no **mesmo projeto**.
 
 ## 5. Operação desassistida (loop de auto-recheck)
-O `/bus` **arma sozinho** o cron horário (passo 2), num minuto aleatório por sessão, **incondicional** (mesmo com inbox vazio) e **idempotente** (checa o `CronList`, não duplica). Dispara `/bus` bare, que re-resolve projeto+slug do registro. Inspecionar: `CronList`; desarmar: `CronDelete <id>`. Cron de sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias, só dispara com o REPL ocioso.
+O `/bus` **arma sozinho** o cron horário (passo 2), num minuto **determinístico** por sessão (derivado do sid — bate com o countdown do dashboard), **incondicional** (mesmo com inbox vazio) e **idempotente/reconciliador** (checa o `CronList`; recria se o minuto divergir). Dispara `/bus` bare, que re-resolve projeto+slug do registro. Inspecionar: `CronList`; desarmar: `CronDelete <id>`. Cron de sessão (some ao fechar o app, re-armado no próximo `/bus`), expira em 7 dias, só dispara com o REPL ocioso.
 
 ## Modelo de coordenação
 - **Quem origina, coordena.** Acompanhe, cobre os retornos, integre, encerre.

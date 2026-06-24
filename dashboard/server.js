@@ -146,21 +146,30 @@ function projectRoot(p) {
 
 const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names', 'presence', 'state']);
 
-// names/<sid>.txt = 2 linhas (projeto, slug). Roster: projeto -> [slug] ordenado.
+// Minuto do cron de uma sessao = soma dos bytes do sid mod 60 (mesmo calculo do
+// bus-name), pro countdown do dashboard bater com o minuto realmente armado.
+function cronMinuteForSid(sid) {
+  let s = 0;
+  for (let i = 0; i < sid.length; i++) s += sid.charCodeAt(i);
+  return s % 60;
+}
+
+// names/<sid>.txt = 2 linhas (projeto, slug). Roster: projeto -> [{slug, cron}].
 // (compat: arquivo de 1 linha = projeto 'default'.)
 function readRoster() {
   const roster = {};
   for (const f of safeReaddir(path.join(BUS_ROOT, 'names'))) {
     if (!f.endsWith('.txt')) continue;
+    const sid = f.slice(0, -'.txt'.length);
     const lines = (safeReadText(path.join(BUS_ROOT, 'names', f)) || '').split(/\r?\n/);
     let proj = '', slug = '';
     if (lines.length >= 2 && lines[1].trim() !== '') { proj = lines[0].trim(); slug = lines[1].trim(); }
     else if ((lines[0] || '').trim() !== '') { proj = 'default'; slug = lines[0].trim(); }
     else continue;
     if (!proj) proj = 'default';
-    (roster[proj] = roster[proj] || []).push(slug);
+    (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid) });
   }
-  for (const p of Object.keys(roster)) roster[p].sort();
+  for (const p of Object.keys(roster)) roster[p].sort((a, b) => a.slug.localeCompare(b.slug));
   return roster;
 }
 

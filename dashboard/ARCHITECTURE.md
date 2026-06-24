@@ -35,7 +35,7 @@ Sempre inclui `default`.
   "now": 1719000000,
   "project": "petadata",
   "busRoot": "<raiz do projeto>",
-  "specialists": ["pd-e2e", "pd-portal", "..."],
+  "specialists": [{ "slug": "pd-portal", "cron": 11 }, "..."],
   "handoffs": { "inbox": [], "processing": [], "done": [], "rejected": [] },
   "counts": { "inbox": 0, "processing": 0, "done": 4, "rejected": 0 }
 }
@@ -45,7 +45,7 @@ Sempre inclui `default`.
 { "now": 1719000000, "all": true,
   "projects": [ { "project": "default", "specialists": [], "handoffs": {}, "counts": {} }, "..." ] }
 ```
-`specialists`: slugs registrados no projeto (lidos do `names/`, agrupados por projeto).
+`specialists`: especialistas do projeto, cada um `{ slug, cron }` (`cron` = minuto 0-59 do auto-recheck, **determinístico do sid** = soma dos bytes do sid mod 60; o front mostra o countdown até o próximo tique). Lidos do `names/`.
 Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do arquivo
 `to-<to>__from-<from>__<id>.handoff` e do cabeçalho do corpo. Ordem: mais novo primeiro
 (o `id` é `YYYYMMDD-HHMMSS-xxxxxx`). O `done` já vem filtrado (24h, máx 20).

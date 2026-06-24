@@ -24,10 +24,17 @@ $sid = $env:CLAUDE_CODE_SESSION_ID
 if (-not $sid) { $sid = 'unknown' }
 $f = Join-Path $dir ($sid + '.txt')
 
+# Minuto do cron DETERMINISTICO por sessao = soma dos bytes do sid mod 60. Estavel
+# entre chamadas E identico ao que o dashboard calcula do sid -- assim o countdown
+# bate com o minuto realmente armado no cron. (Ainda espalha as sessoes pela hora.)
+$cronMin = 0
+foreach ($ch in $sid.ToCharArray()) { $cronMin += [int][char]$ch }
+$cronMin = $cronMin % 60
+
 function Emit([string]$proj, [string]$slug) {
   Write-Output ('PROJECT=' + $proj)
   Write-Output ('SLUG=' + $slug)
-  Write-Output ('BUS_CRON_MINUTE=' + (Get-Random -Minimum 0 -Maximum 60))
+  Write-Output ('BUS_CRON_MINUTE=' + $cronMin)
 }
 
 if ($Set -ne '') {

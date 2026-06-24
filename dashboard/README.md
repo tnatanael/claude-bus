@@ -16,7 +16,7 @@ Abre em `http://localhost:7878`. Sem `npm install`: usa só `http`, `fs`, `path`
 ## O que ele mostra
 
 - **Seletor de projeto** (no topo): escolha um projeto pra ver só o BUS dele, ou **"Todos"** pra ver todos agrupados (uma seção por projeto). Cada projeto é um namespace isolado: `default` = raiz base; `<p>` = `<base>/<p>`.
-- **Especialistas registrados**: cada projeto mostra, em chips, os slugs registrados nele (lidos do `names/`) — quem está naquela frente.
+- **Especialistas registrados**: cada projeto mostra, em chips, os slugs registrados nele (do `names/`) — quem está naquela frente — com um **countdown** (`~Nm`) até o próximo tique do cron de auto-recheck de cada um.
 - **Handoff flow**: colunas `inbox → processing → done` (+ a área de rejeitados). O **inbox** são os pendentes — rode `/bus` no destino de cada card pra processá-los. Na visão de **projeto único**, conectores SVG ligam cada resposta ao handoff pai (`in_reply_to`). A coluna `done` mostra só as últimas 24h (máx 20, mais recente no topo) — filtro de exibição, o disco não é tocado.
 - **Auth**: contador de rejeitados (handoffs sem token válido foram pra quarentena).
 - **LIVE / MOCK / DOWN**: usa dados mock só até o backend responder pela 1ª vez; depois disso nunca finge dado (vira DOWN se o backend cair).
