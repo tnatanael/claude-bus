@@ -28,7 +28,17 @@ sid="${CLAUDE_CODE_SESSION_ID:-}"
 
 inbox="$bus_root/inbox"; rejected="$bus_root/rejected"
 mkdir -p "$inbox"
-secret=""; [ -f "$bus_root/.bus-secret" ] && secret="$(tr -d ' \r\n' < "$bus_root/.bus-secret")"
+# segredo compartilhado (get-or-create; mv -n evita corrida na 1a criacao) -- mesmo bloco
+# do bus-send.sh / paridade com o Get-BusSecret do bus-inbox.ps1.
+secret_file="$bus_root/.bus-secret"
+if [ ! -f "$secret_file" ]; then
+  if command -v openssl >/dev/null 2>&1; then s="$(openssl rand -hex 32)"
+  else s="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"; fi
+  tmpsec="$secret_file.$$.tmp"; printf '%s' "$s" > "$tmpsec"
+  mv -n "$tmpsec" "$secret_file" 2>/dev/null || true
+  [ -f "$tmpsec" ] && rm -f "$tmpsec"
+fi
+secret="$(tr -d ' \r\n' < "$secret_file")"
 
 found=0
 for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
