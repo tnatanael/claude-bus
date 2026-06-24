@@ -21,6 +21,11 @@ if [ -z "$bus_root" ]; then
   if [ -n "$project" ] && [ "$project" != "default" ]; then bus_root="$base/$project"; else bus_root="$base"; fi
 fi
 
+# Marcador "visto por ultimo" na BASE (global): bus-inbox roda em todo /bus, mantem
+# o "armado" do dashboard fresco mesmo se a IA pular o bus-name na religacao.
+sid="${CLAUDE_CODE_SESSION_ID:-}"
+[ -n "$sid" ] && { mkdir -p "$base/seen"; date +%s > "$base/seen/$sid"; }
+
 inbox="$bus_root/inbox"; rejected="$bus_root/rejected"
 mkdir -p "$inbox"
 secret=""; [ -f "$bus_root/.bus-secret" ] && secret="$(tr -d ' \r\n' < "$bus_root/.bus-secret")"

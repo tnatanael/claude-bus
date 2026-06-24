@@ -26,6 +26,18 @@ if ($BusRoot -eq '') {
 # UTF-8 no stdout: senao o PS 5.1 corrompe acentos do corpo na captura do harness.
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
+# Marcador "visto por ultimo" na BASE (global). O bus-inbox roda em TODO /bus, entao
+# isto mantem o "armado" do dashboard fresco mesmo quando a IA pula o bus-name na
+# religacao (ela ja sabe o slug). O cron dispara /bus de hora em hora -> seen fresco.
+$sid = $env:CLAUDE_CODE_SESSION_ID
+if ($sid) {
+  $seenBase = $env:CLAUDE_BUS_ROOT
+  if (-not $seenBase) { $seenBase = Join-Path $env:TEMP 'claude-bus' }
+  $seenDir = Join-Path $seenBase 'seen'
+  New-Item -ItemType Directory -Force -Path $seenDir | Out-Null
+  [System.IO.File]::WriteAllText((Join-Path $seenDir $sid), (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Get-BusSecret([string]$root) {
   New-Item -ItemType Directory -Force -Path $root | Out-Null
   $path = Join-Path $root '.bus-secret'
