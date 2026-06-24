@@ -323,7 +323,7 @@
   .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
   .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .arm-dot.armed { background: var(--green); }
-  .arm-dot.cold { background: var(--grey); }
+  .arm-dot.cold { background: var(--red); }
   /* Modal de leitura de handoff + thread */
   .handoff { cursor: pointer; }
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.66); display: flex; align-items: center; justify-content: center; z-index: 50; opacity: 0; transition: opacity .18s ease; }
@@ -529,13 +529,18 @@ function handoffCard(it, idSet, proj) {
 // Chips dos especialistas registrados num projeto (do roster names/).
 function specsHtml(specs) {
   if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
-  return specs.map(s => {
-    const slug = (typeof s === "string") ? s : s.slug;
-    const armed = (s && typeof s === "object") ? !!s.armed : false;
+  const armedOf = s => (s && typeof s === "object") ? !!s.armed : false;
+  const slugOf = s => (typeof s === "string") ? s : s.slug;
+  // offline (vermelho) a esquerda, online (verde) a direita; alfabetico dentro de cada grupo
+  const sorted = specs.slice().sort((a, b) =>
+    (armedOf(a) !== armedOf(b)) ? (armedOf(a) ? 1 : -1) : slugOf(a).localeCompare(slugOf(b)));
+  return sorted.map(s => {
+    const slug = slugOf(s);
+    const armed = armedOf(s);
     const dotCls = armed ? "armed" : "cold";
     const tip = armed
       ? "cron de auto-recheck armado e ativo (rodou /bus na última ~1h)"
-      : "cron não confirmado na última ~1h — a sessão pode estar fechada ou o cron parado; rode /bus nela";
+      : "OFFLINE: cron não confirmado na última ~1h — a sessão pode estar fechada ou o cron parado; rode /bus nela";
     return `<span class="spec-chip" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}</span>`;
   }).join("");
 }
