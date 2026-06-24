@@ -200,6 +200,14 @@ function queryParam(reqUrl, key) {
 
 // project='all' -> grouped { now, all:true, projects:[{project,handoffs,counts}] }
 // project=<p>   -> single  { now, project, busRoot, handoffs, counts }
+// Anexa a cada handoff do inbox o minuto do cron do DESTINO (it.to) -> it.toCron.
+// E quando o especialista destino vai pegar o handoff (countdown no card do inbox).
+function attachToCron(handoffs, specs) {
+  const map = {};
+  for (const s of (specs || [])) if (!(s.slug in map)) map[s.slug] = s.cron;
+  for (const it of (handoffs.inbox || [])) it.toCron = (it.to in map) ? map[it.to] : null;
+}
+
 function buildPayload(p) {
   p = p || 'all';
   const roster = readRoster();
@@ -207,6 +215,7 @@ function buildPayload(p) {
     const now = Math.floor(Date.now() / 1000);
     const projects = listProjects().map(name => {
       const st = buildState(projectRoot(name));
+      attachToCron(st.handoffs, roster[name] || []);
       return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts };
     });
     return { now, all: true, projects };
@@ -214,6 +223,7 @@ function buildPayload(p) {
   const st = buildState(projectRoot(p));
   st.project = p;
   st.specialists = roster[p] || [];
+  attachToCron(st.handoffs, roster[p] || []);
   return st;
 }
 

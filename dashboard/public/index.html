@@ -319,7 +319,7 @@
   .specs-label { font-size: 11px; color: var(--muted); }
   .spec-chip { font-family: var(--mono); font-size: 11px; color: var(--text); background: rgba(88,166,255,0.12); border: 1px solid rgba(88,166,255,0.35); border-radius: 10px; padding: 2px 8px; }
   .specs-empty { font-size: 11px; color: var(--muted); font-style: italic; }
-  .spec-eta { color: var(--muted); font-size: 10px; }
+  .eta { font-family: var(--mono); font-size: 10px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.35); border-radius: 6px; padding: 1px 6px; }
 </style>
 </head>
 <body>
@@ -471,6 +471,8 @@ function handoffCard(it, idSet) {
   }
   const replyTo = it.inReplyTo ? esc(it.inReplyTo) : "";
   const linkable = (it.inReplyTo && parentPresent) ? " linkable" : "";
+  // Countdown ate o destino pegar o handoff (so no inbox: o server so anexa toCron la).
+  const etaTag = (it.toCron === 0 || it.toCron) ? `<span class="eta" data-cron="${it.toCron}" data-to="${esc(it.to)}"></span>` : "";
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}">
       <div class="route">
@@ -479,7 +481,7 @@ function handoffCard(it, idSet) {
         <span class="to">${esc(it.to)}</span>
       </div>
       <div class="id">${esc(it.id)}</div>
-      <div class="tags">${replyTag}${linkTag}</div>
+      <div class="tags">${replyTag}${linkTag}${etaTag}</div>
     </div>`;
 }
 
@@ -488,9 +490,7 @@ function specsHtml(specs) {
   if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
   return specs.map(s => {
     const slug = (typeof s === "string") ? s : s.slug;
-    const cron = (s && typeof s === "object" && (s.cron === 0 || s.cron)) ? s.cron : null;
-    const eta = (cron != null) ? ` <span class="spec-eta" data-cron="${cron}"></span>` : "";
-    return `<span class="spec-chip">${esc(slug)}${eta}</span>`;
+    return `<span class="spec-chip">${esc(slug)}</span>`;
   }).join("");
 }
 
@@ -499,14 +499,15 @@ function specsHtml(specs) {
 function updateEtas() {
   const now = new Date();
   const secNow = now.getMinutes() * 60 + now.getSeconds();
-  document.querySelectorAll(".spec-eta[data-cron]").forEach(el => {
+  document.querySelectorAll(".eta[data-cron]").forEach(el => {
     const cron = parseInt(el.getAttribute("data-cron"), 10);
     if (isNaN(cron)) return;
     let diff = cron * 60 - secNow;
     if (diff <= 0) diff += 3600;
     const mins = Math.ceil(diff / 60);
-    el.textContent = "· ~" + mins + "m";
-    el.title = "auto-recheck no minuto :" + String(cron).padStart(2, "0") + " de cada hora (~" + mins + " min, se a sessão estiver aberta)";
+    const to = el.getAttribute("data-to") || "destino";
+    el.textContent = "⏱ ~" + mins + "m";
+    el.title = to + " processa no minuto :" + String(cron).padStart(2, "0") + " de cada hora (~" + mins + " min, se a sessão estiver aberta)";
   });
 }
 

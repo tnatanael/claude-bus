@@ -46,6 +46,7 @@ Sempre inclui `default`.
   "projects": [ { "project": "default", "specialists": [], "handoffs": {}, "counts": {} }, "..." ] }
 ```
 `specialists`: especialistas do projeto, cada um `{ slug, cron }` (`cron` = minuto 0-59 do auto-recheck, **determinístico do sid** = soma dos bytes do sid mod 60; o front mostra o countdown até o próximo tique). Lidos do `names/`.
+Os itens do `inbox` ainda trazem `toCron` (minuto do cron do destino), que o front usa pro countdown `⏱ ~Nm` no card.
 Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do arquivo
 `to-<to>__from-<from>__<id>.handoff` e do cabeçalho do corpo. Ordem: mais novo primeiro
 (o `id` é `YYYYMMDD-HHMMSS-xxxxxx`). O `done` já vem filtrado (24h, máx 20).
