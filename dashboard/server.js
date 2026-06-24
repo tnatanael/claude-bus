@@ -106,6 +106,61 @@ function readHandoffs(folder, root) {
   return items;
 }
 
+// Corpo "puro" do handoff: o texto entre a linha "---" e "###BUS-END" (sem tags/header).
+function parseHandoffBody(text) {
+  if (!text) return '';
+  const m = text.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n?###BUS-END/m);
+  if (m) return m[1].trim();
+  const i = text.search(/^---[ \t]*$/m);
+  if (i >= 0) return text.slice(i).replace(/^---[ \t]*\r?\n/, '').replace(/###BUS-END[\s\S]*$/, '').trim();
+  return text.trim();
+}
+
+// Le TODOS os handoffs do projeto (4 pastas, done SEM filtro) com corpo -- base do thread.
+function readAllForThread(root) {
+  const items = [];
+  for (const folder of HANDOFF_FOLDERS) {
+    const dir = path.join(root, folder);
+    for (const f of safeReaddir(dir)) {
+      const fromName = parseHandoffFilename(f);
+      if (!fromName) continue;
+      const raw = safeReadText(path.join(dir, f));
+      const header = parseHandoffHeader(raw);
+      items.push({
+        id: header.id || fromName.id,
+        from: header.from || fromName.from,
+        to: header.to || fromName.to,
+        replyRequired: String(header.reply_required).toLowerCase() === 'true',
+        inReplyTo: header.in_reply_to || '',
+        folder,
+        body: parseHandoffBody(raw),
+      });
+    }
+  }
+  return items;
+}
+
+// Thread = componente conexo (via in_reply_to, nao-direcionado) que contem targetId,
+// ordenado cronologicamente (id e timestamp-prefixado) = ordem de precedencia.
+function buildThread(root, targetId) {
+  const items = readAllForThread(root);
+  const byId = new Map(items.map(it => [it.id, it]));
+  const adj = new Map();
+  const link = (a, b) => { if (!adj.has(a)) adj.set(a, new Set()); adj.get(a).add(b); };
+  for (const it of items) {
+    if (it.inReplyTo && byId.has(it.inReplyTo)) { link(it.id, it.inReplyTo); link(it.inReplyTo, it.id); }
+  }
+  const seen = new Set([targetId]);
+  const queue = [targetId];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const nb of (adj.get(cur) || [])) if (!seen.has(nb)) { seen.add(nb); queue.push(nb); }
+  }
+  const thread = [...seen].filter(id => byId.has(id)).map(id => byId.get(id));
+  thread.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return thread.map(it => Object.assign({ isTarget: it.id === targetId }, it));
+}
+
 // Timestamp prefix of a handoff id (YYYYMMDD-HHMMSS-xxxxxx) -> epoch seconds (local
 // time, matching how the sender stamps it). null if it doesn't parse.
 function idToEpochSec(id) {
@@ -338,6 +393,18 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && urlPath === '/api/projects') {
     try { sendJson(res, { projects: listProjects() }); }
     catch (e) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: String(e) })); }
+    return;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/thread') {
+    try {
+      const proj = queryParam(req.url, 'project') || 'default';
+      const id = queryParam(req.url, 'id');
+      sendJson(res, { id, project: proj, thread: buildThread(projectRoot(proj), id) });
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(e) }));
+    }
     return;
   }
 

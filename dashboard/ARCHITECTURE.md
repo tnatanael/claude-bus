@@ -56,6 +56,16 @@ Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do 
 um `: ping` a cada ~5s. O front pode usar SSE **ou** simplesmente pollar `/api/state`
 (é o que ele faz, a cada ~1.5s).
 
+### `GET /api/thread?project=<p>&id=<id>`
+A thread (conversa) que contém o handoff `id`: o **componente conexo** via `in_reply_to`
+(grafo não-direcionado), lendo TODOS os handoffs do projeto (done **sem filtro**), cada
+um com o **corpo puro** (texto entre `---` e `###BUS-END`). Ordenado por `id` (cronológico
+= ordem de precedência).
+```json
+{ "id": "...", "project": "...",
+  "thread": [ { "id", "from", "to", "folder", "replyRequired", "inReplyTo", "body", "isTarget" } ] }
+```
+
 ## Frontend (`public/index.html`)
 - Um arquivo (HTML + CSS + JS vanilla), sem framework, sem build.
 - Popula o seletor via `/api/projects` e polla `/api/state?project=<selecionado>`.
