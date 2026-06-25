@@ -62,21 +62,38 @@ try {
     } catch {}   # lock corrompido/ilegivel -> trata como livre
   }
 
-  # 5. Tem handoff pendente pra mim no MEU projeto?
+  # 5. Varre o inbox do projeto: tenho pendente? e ALGUM outro especialista tem?
   $projRoot = $base
   if ($project -and $project -ne 'default') { $projRoot = Join-Path $base $project }
   $inbox = Join-Path $projRoot 'inbox'
-  $pending = $false
+  $myPending = $false; $othersPending = $false
   if (Test-Path -LiteralPath $inbox) {
-    $cands = Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue |
-             Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like ('to-' + $slug + '__*') }
-    foreach ($c in $cands) {
+    foreach ($c in (Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like 'to-*' })) {
       $txt = Get-Content -LiteralPath $c.FullName -Raw -ErrorAction SilentlyContinue
-      if ($txt -and ($txt -match '###BUS-END')) { $pending = $true; break }
+      if (-not ($txt -and ($txt -match '###BUS-END'))) { continue }
+      $toSlug = if ($c.Name -match '^to-(.+?)__') { $matches[1] } else { '' }
+      if ($toSlug -eq $slug) { $myPending = $true } elseif ($toSlug -ne '') { $othersPending = $true }
     }
   }
 
-  if ($pending) {
+  # 5b. PRIORIDADE BAIXA (PO/coordenador): se EU estou marcado low-prio e algum OUTRO
+  # especialista do projeto tem handoff pendente, CEDO a vez (defiro). So processo o meu
+  # quando ninguem mais tem trabalho -> consolido por ultimo. Marca: <projroot>/.lowprio
+  # (1 slug por linha). So vale quando EU tenho trabalho (myPending) -- senao a logica
+  # normal de re-arme/empty segue valendo.
+  $isLowPrio = $false
+  $lowFile = Join-Path $projRoot '.lowprio'
+  if (Test-Path -LiteralPath $lowFile) {
+    foreach ($ln in @(Get-Content -LiteralPath $lowFile -ErrorAction SilentlyContinue)) {
+      if ($ln.Trim() -eq $slug) { $isLowPrio = $true; break }
+    }
+  }
+  if ($isLowPrio -and $myPending -and $othersPending) {
+    [Console]::Error.WriteLine('BUS: prioridade baixa -- outros especialistas tem handoff; cedendo a vez (processo por ultimo).')
+    exit 2
+  }
+
+  if ($myPending) {
     # acquire: cria exclusivo; se ja existe e e MEU ou EXPIRADO, sobrescreve (steal).
     $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
     $enc = New-Object System.Text.UTF8Encoding($false)

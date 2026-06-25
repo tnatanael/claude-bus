@@ -66,6 +66,8 @@ Registre o hook **`UserPromptSubmit`** no `settings.json` (global: `~/.claude/se
 
 O hook é **fail-open** (qualquer erro → deixa passar) e só age em prompts `/bus`: grava o `seen` (prova de vida pro dashboard), defere (`exit 2`, sem custo de API) se outro segura o lock ou se sua inbox está vazia, e adquire o lock quando há handoff pra você. O passo 7 do `/bus` libera o lock; um **lease de 30 min** é a rede de segurança se a sessão cair. O dashboard mostra quem segura o lock ("Trabalhando agora").
 
+**Prioridade baixa (PO/coordenador):** crie `<raiz-do-projeto>/.lowprio` com o slug (1 por linha) pra marcar um especialista como *low-prio*. O gate o faz **ceder a vez** — ele só adquire o lock e processa o próprio inbox quando **nenhum outro especialista do projeto** tem handoff pendente (consolida **por último**). Bom pra um PO que recebe muitos retornos: deixa os especialistas terminarem antes. ⚠️ *Starvation:* num projeto sempre cheio o PO pode esperar muito (é o comportamento pedido — fique ciente).
+
 ## Modelo de coordenação
 - **Quem origina, coordena.** Acompanhe, cobre os retornos, integre, encerre.
 - **Peer-to-peer, direta** (dentro do projeto). Sem maestro central.

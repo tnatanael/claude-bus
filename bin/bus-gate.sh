@@ -52,19 +52,35 @@ main() {
     fi
   fi
 
-  # 4. tem handoff pendente pra mim no MEU projeto?
+  # 4. varre o inbox do projeto: tenho pendente? e ALGUM outro especialista tem?
   projroot="$base"
   if [ -n "$project" ] && [ "$project" != "default" ]; then projroot="$base/$project"; fi
   inbox="$projroot/inbox"
-  pending=0
+  mypending=0; otherspending=0
   if [ -d "$inbox" ]; then
-    for f in "$inbox"/to-"$slug"__*.handoff; do
+    for f in "$inbox"/to-*.handoff; do
       [ -e "$f" ] || continue
-      if grep -q '###BUS-END' "$f" 2>/dev/null; then pending=1; break; fi
+      grep -q '###BUS-END' "$f" 2>/dev/null || continue
+      bn="$(basename "$f")"; toslug="${bn#to-}"; toslug="${toslug%%__*}"   # entre 'to-' e o 1o '__'
+      if [ "$toslug" = "$slug" ]; then mypending=1; else otherspending=1; fi
     done
   fi
 
-  if [ "$pending" = "1" ]; then
+  # 4b. PRIORIDADE BAIXA (PO/coordenador): se EU estou marcado e algum OUTRO tem handoff,
+  # cedo a vez (defiro) -- so processo o meu quando ninguem mais tem trabalho. Marca:
+  # arquivo <projroot>/.lowprio (1 slug por linha). So vale quando EU tenho trabalho.
+  islowprio=0
+  if [ -f "$projroot/.lowprio" ]; then
+    while IFS= read -r ln; do
+      [ "$(printf '%s' "$ln" | tr -d ' \r\n')" = "$slug" ] && islowprio=1
+    done < "$projroot/.lowprio"
+  fi
+  if [ "$islowprio" = "1" ] && [ "$mypending" = "1" ] && [ "$otherspending" = "1" ]; then
+    echo 'BUS: prioridade baixa -- outros tem handoff; cedendo a vez (processo por ultimo).' >&2
+    exit 2
+  fi
+
+  if [ "$mypending" = "1" ]; then
     exp=$(( now + LEASE_MIN * 60 ))
     iso_now="$(date -d "@$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$now")"
     iso_exp="$(date -d "@$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$exp")"
