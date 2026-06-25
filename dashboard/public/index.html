@@ -434,6 +434,8 @@
 const POLL_MS = 1500;
 const API = "/api/state";
 let selectedProject = (function () { try { return localStorage.getItem("busProject") || "all"; } catch (_) { return "all"; } })();
+// MRU dos donos do lock: quem pegou por ultimo fica em [0] (mais a esquerda). Persiste no F5.
+window.__lockMRU = (function () { try { return JSON.parse(localStorage.getItem("busLockMRU") || "[]"); } catch (_) { return []; } })();
 
 // ---- MOCK fallback (usado só até o backend real responder; auto-desativa no 1o hit) ----
 // Espelha o schema de projeto único do /api/state pra UI ser demonstravel offline.
@@ -544,9 +546,15 @@ function specsHtml(specs) {
   if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
   const armedOf = s => (s && typeof s === "object") ? !!s.armed : false;
   const slugOf = s => (typeof s === "string") ? s : s.slug;
-  // offline (vermelho) a esquerda, online (verde) a direita; alfabetico dentro de cada grupo
-  const sorted = specs.slice().sort((a, b) =>
-    (armedOf(a) !== armedOf(b)) ? (armedOf(a) ? 1 : -1) : slugOf(a).localeCompare(slugOf(b)));
+  const mru = window.__lockMRU || [];
+  const rank = s => { const i = mru.indexOf(slugOf(s)); return i < 0 ? Infinity : i; };
+  // quem pegou o lock por último vai pra esquerda (ordem MRU); resto: offline esquerda, online direita
+  const sorted = specs.slice().sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;                              // MRU: índice menor = mais recente = mais à esquerda
+    if (armedOf(a) !== armedOf(b)) return armedOf(a) ? 1 : -1;  // sem histórico de lock: offline à esquerda
+    return slugOf(a).localeCompare(slugOf(b));
+  });
   return sorted.map(s => {
     const slug = slugOf(s);
     const armed = armedOf(s);
@@ -566,6 +574,17 @@ function nextOccur(fromMs, m) {
   if (d.getMinutes() <= m) d.setMinutes(m);
   else { d.setHours(d.getHours() + 1); d.setMinutes(m); }
   return d.getTime();
+}
+
+// proximo tick (de :M ou :M+30) do cron do DESTINO do card, a partir de agora; Infinity se sem cron.
+function nextTickMs(it) {
+  const cs = [it.toCron, it.toCron2].filter(c => c === 0 || c).map(Number).filter(n => !isNaN(n));
+  if (!cs.length) return Infinity;
+  return Math.min.apply(null, cs.map(c => nextOccur(Date.now(), c)));
+}
+// inbox ordenada pelo tick mais proximo no topo (quem vai ser pego antes fica acima).
+function sortInboxByTick(items) {
+  return (items || []).slice().sort((a, b) => nextTickMs(a) - nextTickMs(b));
 }
 
 function updateEtas() {
@@ -613,6 +632,17 @@ function highlightHolderChip() {
 }
 const LOCK_TIP = '<span class="lk-info" tabindex="0">!<span class="lk-tip"><b>Lock de concorrência</b><br>Só <b>1 especialista trabalha por vez na conta inteira</b> — o limite de requisições da API é da <b>conta</b> Claude, não do projeto. Quem pega um handoff segura este lock; os demais <code>/bus</code> deferem <b>sem gastar API</b> (bloqueados pelo hook antes de acordar o modelo) e tentam de novo no próximo tique do cron (~30 min). Se a sessão que segura cair, o lock <b>expira sozinho</b> pelo lease e libera os outros.</span></span>';
 
+// Atualiza o MRU: novo dono do lock vai pro topo (esquerda), mantendo a ordem atras dele.
+function noteHolderMRU(holder) {
+  if (holder && holder.slug) {
+    const mru = window.__lockMRU || [];
+    if (mru[0] !== holder.slug) {
+      window.__lockMRU = [holder.slug].concat(mru.filter(s => s !== holder.slug)).slice(0, 30);
+      try { localStorage.setItem("busLockMRU", JSON.stringify(window.__lockMRU)); } catch (_) {}
+    }
+  }
+}
+
 function renderHolder(holder) {
   const bar = document.getElementById("lockbar");
   if (!bar) return;
@@ -648,7 +678,7 @@ function renderAll(projects) {
       <div class="section-title">📦 ${esc(p.project)} <span class="hint">inbox ${c.inbox||0} · processing ${c.processing||0} · done ${c.done||0} · rejected ${c.rejected||0}</span></div>
       <div class="specs"><span class="specs-label">especialistas:</span> ${specsHtml(p.specialists)}</div>
       <div class="flow proj-flow">
-        ${col('Inbox', h.inbox, 'inbox', p.project)}
+        ${col('Inbox', sortInboxByTick(h.inbox), 'inbox', p.project)}
         ${col('Processing', h.processing, 'processing', p.project)}
         ${col('Done', h.done, 'done', p.project)}
       </div>`;
@@ -783,7 +813,7 @@ function clearHighlight() {
 
 function renderHandoffs(h, proj) {
   const idSet = buildIdSet(h);
-  renderColumn("inbox", h.inbox, idSet, proj);
+  renderColumn("inbox", sortInboxByTick(h.inbox), idSet, proj);
   renderColumn("processing", h.processing, idSet, proj);
   renderColumn("done", h.done, idSet, proj);
   renderRejected(h.rejected, idSet, proj);
@@ -804,6 +834,7 @@ function cssEscape(s) {
 
 function render(state) {
   document.getElementById("now").textContent = fmtClock(state.now);
+  noteHolderMRU(state.holder);   // atualiza o MRU antes de desenhar os chips
   const single = document.getElementById("singleSection");
   const all = document.getElementById("allSection");
 
