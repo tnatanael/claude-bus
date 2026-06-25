@@ -433,7 +433,7 @@
 
 const POLL_MS = 1500;
 const API = "/api/state";
-let selectedProject = "all";
+let selectedProject = (function () { try { return localStorage.getItem("busProject") || "all"; } catch (_) { return "all"; } })();
 
 // ---- MOCK fallback (usado só até o backend real responder; auto-desativa no 1o hit) ----
 // Espelha o schema de projeto único do /api/state pra UI ser demonstravel offline.
@@ -581,9 +581,12 @@ function updateEtas() {
     if (!isNaN(sent)) expected = Math.min.apply(null, crons.map(c => nextOccur(sent, c)));
     if (expected != null && nowMs > expected + TOL) {
       const lateMin = Math.floor((nowMs - expected) / 60000);
-      el.textContent = "⚠ atrasado " + lateMin + "m";
+      const nextTick = Math.min.apply(null, crons.map(c => nextOccur(nowMs, c)));
+      const retryMin = Math.max(0, Math.ceil((nextTick - nowMs) / 60000));
+      const missed = Math.max(1, Math.round((nowMs - expected) / (30 * 60000)));
+      el.textContent = "⚠ atrasado " + lateMin + "m · retry ~" + retryMin + "m";
       el.classList.add("late");
-      el.title = to + " já devia ter pego (~" + lateMin + " min atrás) e não pegou. O cron do destino pode estar parado — rode /bus nele.";
+      el.title = to + " perdeu ~" + missed + " tique(s) — provavelmente o lock global estava ocupado quando o cron tentou (normal). Próxima tentativa ~" + retryMin + " min (minuto :" + crons.map(c => String(c).padStart(2, "0")).join(" / :") + "). Se persistir muito, o cron do destino pode estar parado — rode /bus nele.";
     } else {
       let remain;
       if (expected != null) remain = Math.max(0, Math.ceil((expected - nowMs) / 60000));
@@ -875,10 +878,12 @@ async function loadProjects() {
     sel.innerHTML = '<option value="all">Todos</option>' +
       (data.projects || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
     sel.value = cur;
+    if (sel.value !== cur) { selectedProject = "all"; sel.value = "all"; }   // projeto salvo nao existe mais
   } catch (_) {}
 }
 document.getElementById("projectSel").addEventListener("change", e => {
   selectedProject = e.target.value || "all";
+  try { localStorage.setItem("busProject", selectedProject); } catch (_) {}   // persiste o filtro no F5
   lastHandoffSig = "";   // força re-render ao trocar de projeto
   tick();
 });
