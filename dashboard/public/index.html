@@ -325,11 +325,15 @@
   .arm-dot.armed { background: var(--green); }
 .lockbar { margin: 8px 0 0; padding: 6px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; }
 .lockbar.busy { background: rgba(224,160,0,.14); border-color: rgba(224,160,0,.5); }
-.lockbar.free { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); opacity: .6; }
+.lockbar.free { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.06); color: #8a93a3; }
 .lockbar .lk-slug { font-weight: 700; color: #ffcf66; }
 .lockbar .lk-proj { opacity: .7; }
-.lockbar .lk-note { opacity: .6; font-style: italic; }
 .lockbar .lk-free { font-weight: 600; }
+.lockbar .lk-lease { color: #ffcf66; }
+.lk-info { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:5px; border-radius:50%; background:rgba(255,255,255,.18); color:#fff; font-size:11px; font-weight:700; cursor:help; position:relative; vertical-align:middle; }
+.lk-info .lk-tip { display:none; position:absolute; top:150%; right:0; z-index:50; width:310px; padding:10px 12px; border-radius:8px; background:#1b1f27; border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 28px rgba(0,0,0,.55); color:#dfe4ea; font-size:12px; font-weight:400; line-height:1.5; text-align:left; white-space:normal; }
+.lk-info:hover .lk-tip, .lk-info:focus .lk-tip { display:block; }
+.lk-tip code { background:rgba(255,255,255,.12); padding:0 3px; border-radius:3px; }
 .spec-chip.working { border-color: rgba(224,160,0,.7); box-shadow: 0 0 0 2px rgba(224,160,0,.35); }
   .arm-dot.cold { background: var(--red); }
   /* Modal de leitura de handoff + thread */
@@ -604,19 +608,23 @@ function highlightHolderChip() {
   document.querySelectorAll(".spec-chip").forEach(c =>
     c.classList.toggle("working", !!slug && c.getAttribute("data-slug") === slug));
 }
+const LOCK_TIP = '<span class="lk-info" tabindex="0">!<span class="lk-tip"><b>Lock de concorrência</b><br>Só <b>1 especialista trabalha por vez na conta inteira</b> — o limite de requisições da API é da <b>conta</b> Claude, não do projeto. Quem pega um handoff segura este lock; os demais <code>/bus</code> deferem <b>sem gastar API</b> (bloqueados pelo hook antes de acordar o modelo) e tentam de novo no próximo tique do cron (~30 min). Se a sessão que segura cair, o lock <b>expira sozinho</b> pelo lease e libera os outros.</span></span>';
+
 function renderHolder(holder) {
   const bar = document.getElementById("lockbar");
   if (!bar) return;
   if (holder && holder.slug) {
     window.__lockHolderSlug = holder.slug;
     bar.className = "lockbar busy";
+    const remMin = holder.expiry ? Math.max(0, Math.round((new Date(holder.expiry).getTime() - Date.now()) / 60000)) : null;
+    const leaseTxt = (remMin != null) ? ' · <span class="lk-lease">lease expira ~' + remMin + 'm</span>' : '';
     bar.innerHTML = '🔒 <b>Trabalhando agora:</b> <span class="lk-slug">' + esc(holder.slug) +
       '</span> <span class="lk-proj">(' + esc(holder.project || "default") + ')</span> · desde ' +
-      fmtHM(holder.since) + ' · <span class="lk-note">os demais aguardam o lock (1 por vez, conta toda)</span>';
+      fmtHM(holder.since) + leaseTxt + ' ' + LOCK_TIP;
   } else {
     window.__lockHolderSlug = null;
     bar.className = "lockbar free";
-    bar.innerHTML = '🔓 <span class="lk-free">lock livre</span> · ninguém trabalhando';
+    bar.innerHTML = '🔓 <span class="lk-free">lock livre</span> · ninguém trabalhando ' + LOCK_TIP;
   }
   highlightHolderChip();
 }
