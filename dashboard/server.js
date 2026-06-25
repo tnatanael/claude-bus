@@ -270,7 +270,24 @@ function queryParam(reqUrl, key) {
 function attachToCron(handoffs, specs) {
   const map = {};
   for (const s of (specs || [])) if (!(s.slug in map)) map[s.slug] = s.cron;
-  for (const it of (handoffs.inbox || [])) it.toCron = (it.to in map) ? map[it.to] : null;
+  for (const it of (handoffs.inbox || [])) {
+    const c = (it.to in map) ? map[it.to] : null;
+    it.toCron = c;
+    it.toCron2 = (c == null) ? null : (c + 30) % 60;   // cron dispara 2x/h (:c e :c+30)
+  }
+}
+
+// Lock GLOBAL de concorrencia (1 por maquina, na BASE -- o limite de API e da CONTA,
+// nao do projeto): quem esta "trabalhando agora". null se livre ou expirado.
+function readLockHolder() {
+  try {
+    const raw = safeReadText(path.join(BUS_ROOT, '.bus-lock'));
+    if (!raw) return null;
+    const L = JSON.parse(raw);
+    const expSec = Math.floor(new Date(L.expiry).getTime() / 1000);
+    if (!(Math.floor(Date.now() / 1000) < expSec)) return null;   // expirado => ninguem
+    return { slug: L.slug || '?', project: L.project || 'default', since: L.since || null, expiry: L.expiry || null };
+  } catch (_) { return null; }
 }
 
 function buildPayload(p) {
@@ -283,12 +300,13 @@ function buildPayload(p) {
       attachToCron(st.handoffs, roster[name] || []);
       return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts };
     });
-    return { now, all: true, projects };
+    return { now, all: true, projects, holder: readLockHolder() };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
   st.specialists = roster[p] || [];
   attachToCron(st.handoffs, roster[p] || []);
+  st.holder = readLockHolder();
   return st;
 }
 

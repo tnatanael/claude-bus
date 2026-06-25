@@ -323,6 +323,14 @@
   .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
   .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .arm-dot.armed { background: var(--green); }
+.lockbar { margin: 8px 0 0; padding: 6px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; }
+.lockbar.busy { background: rgba(224,160,0,.14); border-color: rgba(224,160,0,.5); }
+.lockbar.free { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); opacity: .6; }
+.lockbar .lk-slug { font-weight: 700; color: #ffcf66; }
+.lockbar .lk-proj { opacity: .7; }
+.lockbar .lk-note { opacity: .6; font-style: italic; }
+.lockbar .lk-free { font-weight: 600; }
+.spec-chip.working { border-color: rgba(224,160,0,.7); box-shadow: 0 0 0 2px rgba(224,160,0,.35); }
   .arm-dot.cold { background: var(--red); }
   /* Modal de leitura de handoff + thread */
   .handoff { cursor: pointer; }
@@ -356,6 +364,7 @@
     <span>now: <b id="now">…</b></span>
     <span class="src" id="src">…</span>
   </div>
+  <div id="lockbar" class="lockbar free">🔓 lock livre</div>
 </header>
 
 <main>
@@ -513,7 +522,7 @@ function handoffCard(it, idSet, proj) {
   const replyTo = it.inReplyTo ? esc(it.inReplyTo) : "";
   const linkable = (it.inReplyTo && parentPresent) ? " linkable" : "";
   // Countdown ate o destino pegar o handoff (so no inbox: o server so anexa toCron la).
-  const etaTag = (it.toCron === 0 || it.toCron) ? `<span class="eta" data-cron="${it.toCron}" data-to="${esc(it.to)}" data-sent="${idToEpoch(it.id)}"></span>` : "";
+  const etaTag = (it.toCron === 0 || it.toCron) ? `<span class="eta" data-cron="${it.toCron}" data-cron2="${(it.toCron2 === 0 || it.toCron2) ? it.toCron2 : ""}" data-to="${esc(it.to)}" data-sent="${idToEpoch(it.id)}"></span>` : "";
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
       <div class="route">
@@ -541,45 +550,75 @@ function specsHtml(specs) {
     const tip = armed
       ? "cron de auto-recheck armado e ativo (rodou /bus na última ~1h)"
       : "OFFLINE: cron não confirmado na última ~1h — a sessão pode estar fechada ou o cron parado; rode /bus nela";
-    return `<span class="spec-chip" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}</span>`;
+    return `<span class="spec-chip" data-slug="${esc(slug)}" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}</span>`;
   }).join("");
 }
 
 // Countdown ("~Nm") ate o proximo tique do cron de cada especialista. O minuto vem
 // do roster (deterministico do sid); o cron dispara nesse minuto de cada hora.
+// proxima ocorrencia do minuto `m` em/apos fromMs (epoch ms)
+function nextOccur(fromMs, m) {
+  const d = new Date(fromMs); d.setSeconds(0, 0);
+  if (d.getMinutes() <= m) d.setMinutes(m);
+  else { d.setHours(d.getHours() + 1); d.setMinutes(m); }
+  return d.getTime();
+}
+
 function updateEtas() {
   const nowMs = Date.now();
-  const now = new Date(nowMs);
-  const TOL = 5 * 60 * 1000;   // tolerancia de 5 min depois do tique esperado
+  const TOL = 5 * 60 * 1000;   // tolerancia depois do tique esperado
   document.querySelectorAll(".eta[data-cron]").forEach(el => {
-    const cron = parseInt(el.getAttribute("data-cron"), 10);
-    if (isNaN(cron)) return;
+    const crons = [parseInt(el.getAttribute("data-cron"), 10), parseInt(el.getAttribute("data-cron2"), 10)].filter(n => !isNaN(n));
+    if (!crons.length) return;
     const to = el.getAttribute("data-to") || "destino";
-    const mm = String(cron).padStart(2, "0");
     const sent = parseInt(el.getAttribute("data-sent"), 10);
-    // pickup esperado = primeiro :cron em/apos o envio do handoff
+    // pickup esperado = primeiro tique (de :c ou :c+30) em/apos o envio do handoff
     let expected = null;
-    if (!isNaN(sent)) {
-      const d = new Date(sent); d.setSeconds(0, 0);
-      if (d.getMinutes() <= cron) d.setMinutes(cron);
-      else { d.setHours(d.getHours() + 1); d.setMinutes(cron); }
-      expected = d.getTime();
-    }
+    if (!isNaN(sent)) expected = Math.min.apply(null, crons.map(c => nextOccur(sent, c)));
     if (expected != null && nowMs > expected + TOL) {
-      // passou do tique esperado + 5min e ainda esta no inbox => atrasado
       const lateMin = Math.floor((nowMs - expected) / 60000);
       el.textContent = "⚠ atrasado " + lateMin + "m";
       el.classList.add("late");
-      el.title = to + " devia ter pego no minuto :" + mm + " (~" + lateMin + " min atrás) e não pegou. O cron do destino pode estar parado — rode /bus nele.";
+      el.title = to + " já devia ter pego (~" + lateMin + " min atrás) e não pegou. O cron do destino pode estar parado — rode /bus nele.";
     } else {
       let remain;
       if (expected != null) remain = Math.max(0, Math.ceil((expected - nowMs) / 60000));
-      else { let diff = cron * 60 - (now.getMinutes() * 60 + now.getSeconds()); if (diff <= 0) diff += 3600; remain = Math.ceil(diff / 60); }
+      else {
+        const cur = new Date(nowMs).getMinutes() * 60 + new Date(nowMs).getSeconds();
+        remain = Math.min.apply(null, crons.map(c => { let diff = c * 60 - cur; if (diff <= 0) diff += 3600; return Math.ceil(diff / 60); }));
+      }
       el.textContent = "⏱ ~" + remain + "m";
       el.classList.remove("late");
-      el.title = to + " processa no minuto :" + mm + " (~" + remain + " min, se a sessão estiver aberta)";
+      el.title = to + " processa a cada ~30 min (~" + remain + " min, se a sessão estiver aberta)";
     }
   });
+}
+
+// ---- Lock holder: quem esta "trabalhando agora" (lock global, 1 por maquina/conta) ----
+function fmtHM(iso) {
+  try { const d = new Date(iso); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+  catch (_) { return "?"; }
+}
+function highlightHolderChip() {
+  const slug = window.__lockHolderSlug || null;
+  document.querySelectorAll(".spec-chip").forEach(c =>
+    c.classList.toggle("working", !!slug && c.getAttribute("data-slug") === slug));
+}
+function renderHolder(holder) {
+  const bar = document.getElementById("lockbar");
+  if (!bar) return;
+  if (holder && holder.slug) {
+    window.__lockHolderSlug = holder.slug;
+    bar.className = "lockbar busy";
+    bar.innerHTML = '🔒 <b>Trabalhando agora:</b> <span class="lk-slug">' + esc(holder.slug) +
+      '</span> <span class="lk-proj">(' + esc(holder.project || "default") + ')</span> · desde ' +
+      fmtHM(holder.since) + ' · <span class="lk-note">os demais aguardam o lock (1 por vez, conta toda)</span>';
+  } else {
+    window.__lockHolderSlug = null;
+    bar.className = "lockbar free";
+    bar.innerHTML = '🔓 <span class="lk-free">lock livre</span> · ninguém trabalhando';
+  }
+  highlightHolderChip();
 }
 
 // Visão agrupada "Todos": uma seção por projeto (colunas simples, sem conectores).
@@ -766,6 +805,7 @@ function render(state) {
       [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k => (p.handoffs[k]||[]).map(it => it.id).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     updateEtas();
+    renderHolder(state.holder);
     return;
   }
 
@@ -785,6 +825,7 @@ function render(state) {
     lastHandoffSig = sig;
     renderHandoffs(h, state.project);
   }
+  renderHolder(state.holder);
 }
 
 async function tick() {
