@@ -569,10 +569,10 @@ function specsHtml(specs) {
 // Countdown ("~Nm") ate o proximo tique do cron de cada especialista. O minuto vem
 // do roster (deterministico do sid); o cron dispara nesse minuto de cada hora.
 // proxima ocorrencia do minuto `m` em/apos fromMs (epoch ms)
+// próxima ocorrência do minuto `m` ESTRITAMENTE após fromMs (epoch ms)
 function nextOccur(fromMs, m) {
-  const d = new Date(fromMs); d.setSeconds(0, 0);
-  if (d.getMinutes() <= m) d.setMinutes(m);
-  else { d.setHours(d.getHours() + 1); d.setMinutes(m); }
+  const d = new Date(fromMs); d.setSeconds(0, 0); d.setMinutes(m);
+  if (d.getTime() < fromMs) d.setHours(d.getHours() + 1);
   return d.getTime();
 }
 
@@ -607,15 +607,12 @@ function updateEtas() {
       el.classList.add("late");
       el.title = to + " perdeu ~" + missed + " tique(s) — provavelmente o lock global estava ocupado quando o cron tentou (normal). Próxima tentativa ~" + retryMin + " min (minuto :" + crons.map(c => String(c).padStart(2, "0")).join(" / :") + "). Se persistir muito, o cron do destino pode estar parado — rode /bus nele.";
     } else {
-      let remain;
-      if (expected != null) remain = Math.max(0, Math.ceil((expected - nowMs) / 60000));
-      else {
-        const cur = new Date(nowMs).getMinutes() * 60 + new Date(nowMs).getSeconds();
-        remain = Math.min.apply(null, crons.map(c => { let diff = c * 60 - cur; if (diff <= 0) diff += 3600; return Math.ceil(diff / 60); }));
-      }
+      // contagem até o PRÓXIMO tique do cron do destino a partir de AGORA (quando será pego)
+      const nextTick = Math.min.apply(null, crons.map(c => nextOccur(nowMs, c)));
+      const remain = Math.max(0, Math.ceil((nextTick - nowMs) / 60000));
       el.textContent = "⏱ ~" + remain + "m";
       el.classList.remove("late");
-      el.title = to + " processa a cada ~30 min (~" + remain + " min, se a sessão estiver aberta)";
+      el.title = to + " processa no próximo tique do cron (~" + remain + " min, a cada 30 min, se a sessão estiver aberta)";
     }
   });
 }
