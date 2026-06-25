@@ -265,15 +265,15 @@ function queryParam(reqUrl, key) {
 
 // project='all' -> grouped { now, all:true, projects:[{project,handoffs,counts}] }
 // project=<p>   -> single  { now, project, busRoot, handoffs, counts }
-// Anexa a cada handoff do inbox o minuto do cron do DESTINO (it.to) -> it.toCron.
-// E quando o especialista destino vai pegar o handoff (countdown no card do inbox).
+// Metadados de exibicao nos itens do INBOX: it.tick=true (o front mostra o eta no card) e
+// it.toArmed = se o cron do destino esta vivo (seen fresco). Com cron */5 (a cada 5 min)
+// o eta vira intervalo fixo; toArmed distingue "na fila" (lock ocupado) de "destino offline".
 function attachToCron(handoffs, specs) {
-  const map = {};
-  for (const s of (specs || [])) if (!(s.slug in map)) map[s.slug] = s.cron;
+  const armedMap = {};
+  for (const s of (specs || [])) if (!(s.slug in armedMap)) armedMap[s.slug] = !!s.armed;
   for (const it of (handoffs.inbox || [])) {
-    const c = (it.to in map) ? map[it.to] : null;
-    it.toCron = c;
-    it.toCron2 = (c == null) ? null : (c + 30) % 60;   // cron dispara 2x/h (:c e :c+30)
+    it.tick = true;
+    it.toArmed = (it.to in armedMap) ? armedMap[it.to] : null;   // null = destino nao registrado
   }
 }
 

@@ -321,6 +321,7 @@
   .specs-empty { font-size: 11px; color: var(--muted); font-style: italic; }
   .eta { font-family: var(--mono); font-size: 10px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.35); border-radius: 6px; padding: 1px 6px; }
   .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
+  .eta.waiting { background: rgba(210,153,34,0.18); border-color: rgba(210,153,34,0.6); }
   .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .arm-dot.armed { background: var(--green); }
 .lockbar { margin: 8px 0 0; padding: 6px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; }
@@ -527,8 +528,9 @@ function handoffCard(it, idSet, proj) {
   }
   const replyTo = it.inReplyTo ? esc(it.inReplyTo) : "";
   const linkable = (it.inReplyTo && parentPresent) ? " linkable" : "";
-  // Countdown ate o destino pegar o handoff (so no inbox: o server so anexa toCron la).
-  const etaTag = (it.toCron === 0 || it.toCron) ? `<span class="eta" data-cron="${it.toCron}" data-cron2="${(it.toCron2 === 0 || it.toCron2) ? it.toCron2 : ""}" data-to="${esc(it.to)}" data-sent="${idToEpoch(it.id)}"></span>` : "";
+  // Eta no inbox (o server marca it.tick nos itens do inbox). data-to-armed distingue
+  // "na fila" (cron do destino vivo) de "destino offline" (cron morto).
+  const etaTag = it.tick ? `<span class="eta" data-to="${esc(it.to)}" data-to-armed="${it.toArmed === false ? "0" : (it.toArmed === true ? "1" : "")}" data-sent="${idToEpoch(it.id)}"></span>` : "";
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
       <div class="route">
@@ -566,53 +568,39 @@ function specsHtml(specs) {
   }).join("");
 }
 
-// Countdown ("~Nm") ate o proximo tique do cron de cada especialista. O minuto vem
-// do roster (deterministico do sid); o cron dispara nesse minuto de cada hora.
-// proxima ocorrencia do minuto `m` em/apos fromMs (epoch ms)
-// próxima ocorrência do minuto `m` ESTRITAMENTE após fromMs (epoch ms)
-function nextOccur(fromMs, m) {
-  const d = new Date(fromMs); d.setSeconds(0, 0); d.setMinutes(m);
-  if (d.getTime() < fromMs) d.setHours(d.getHours() + 1);
-  return d.getTime();
+// Inbox ordenada por TEMPO DE ESPERA: mais antigo (mais tempo na fila do lock) no topo.
+// Com cron */5 (a cada 5 min, sem spread por-sid) o "proximo tique" e igual pra todos os
+// destinos, entao ordenar por isso nao ajuda; ordenamos por idade do handoff (id cronologico).
+function sortInboxByWait(items) {
+  return (items || []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-// proximo tick (de :M ou :M+30) do cron do DESTINO do card, a partir de agora; Infinity se sem cron.
-function nextTickMs(it) {
-  const cs = [it.toCron, it.toCron2].filter(c => c === 0 || c).map(Number).filter(n => !isNaN(n));
-  if (!cs.length) return Infinity;
-  return Math.min.apply(null, cs.map(c => nextOccur(Date.now(), c)));
-}
-// inbox ordenada pelo tick mais proximo no topo (quem vai ser pego antes fica acima).
-function sortInboxByTick(items) {
-  return (items || []).slice().sort((a, b) => nextTickMs(a) - nextTickMs(b));
-}
-
+// O cron de auto-recheck dispara a cada 5 min (:00,:05,:10,...). O card do inbox mostra:
+//  - "⏱ ~Nm": countdown ate o proximo tique (ainda nao passou por nenhum);
+//  - "⏳ N na fila": ja passou por N tiques sem ser pego -> lock estava ocupado (NORMAL);
+//  - "⚠ destino offline": o cron do destino nem esta disparando (seen velho = nao armado).
+const TICK_MS = 5 * 60 * 1000;
 function updateEtas() {
   const nowMs = Date.now();
-  const TOL = 5 * 60 * 1000;   // tolerancia depois do tique esperado
-  document.querySelectorAll(".eta[data-cron]").forEach(el => {
-    const crons = [parseInt(el.getAttribute("data-cron"), 10), parseInt(el.getAttribute("data-cron2"), 10)].filter(n => !isNaN(n));
-    if (!crons.length) return;
+  const nextTick = Math.ceil((nowMs + 1) / TICK_MS) * TICK_MS;     // proximo multiplo de 5 min
+  const remain = Math.max(0, Math.ceil((nextTick - nowMs) / 60000));
+  document.querySelectorAll(".eta").forEach(el => {
     const to = el.getAttribute("data-to") || "destino";
     const sent = parseInt(el.getAttribute("data-sent"), 10);
-    // pickup esperado = primeiro tique (de :c ou :c+30) em/apos o envio do handoff
-    let expected = null;
-    if (!isNaN(sent)) expected = Math.min.apply(null, crons.map(c => nextOccur(sent, c)));
-    if (expected != null && nowMs > expected + TOL) {
-      const lateMin = Math.floor((nowMs - expected) / 60000);
-      const nextTick = Math.min.apply(null, crons.map(c => nextOccur(nowMs, c)));
-      const retryMin = Math.max(0, Math.ceil((nextTick - nowMs) / 60000));
-      const missed = Math.max(1, Math.round((nowMs - expected) / (30 * 60000)));
-      el.textContent = "⚠ atrasado " + lateMin + "m · retry ~" + retryMin + "m";
-      el.classList.add("late");
-      el.title = to + " perdeu ~" + missed + " tique(s) — provavelmente o lock global estava ocupado quando o cron tentou (normal). Próxima tentativa ~" + retryMin + " min (minuto :" + crons.map(c => String(c).padStart(2, "0")).join(" / :") + "). Se persistir muito, o cron do destino pode estar parado — rode /bus nele.";
-    } else {
-      // contagem até o PRÓXIMO tique do cron do destino a partir de AGORA (quando será pego)
-      const nextTick = Math.min.apply(null, crons.map(c => nextOccur(nowMs, c)));
-      const remain = Math.max(0, Math.ceil((nextTick - nowMs) / 60000));
+    const armed = el.getAttribute("data-to-armed");               // "1" armado | "0" offline | "" desconhecido
+    const waited = isNaN(sent) ? 0 : Math.max(0, Math.floor(nowMs / TICK_MS) - Math.floor(sent / TICK_MS));
+    if (waited <= 0) {
+      el.className = "eta";
       el.textContent = "⏱ ~" + remain + "m";
-      el.classList.remove("late");
-      el.title = to + " processa no próximo tique do cron (~" + remain + " min, a cada 30 min, se a sessão estiver aberta)";
+      el.title = to + " processa no proximo tique (~" + remain + " min; cron a cada 5 min)";
+    } else if (armed === "0") {
+      el.className = "eta late";
+      el.textContent = "⚠ destino offline · " + waited + " tick" + (waited > 1 ? "s" : "");
+      el.title = to + ": o cron do destino nao esta disparando (sessao fechada/parada). Ja sao " + waited + " tique(s) sem pickup — rode /bus nele.";
+    } else {
+      el.className = "eta waiting";
+      el.textContent = "⏳ " + waited + " na fila · ~" + remain + "m";
+      el.title = to + " esta na fila do lock global — passou por " + waited + " tique(s) com o lock ocupado (normal sob carga). Proxima tentativa ~" + remain + " min.";
     }
   });
 }
@@ -675,7 +663,7 @@ function renderAll(projects) {
       <div class="section-title">📦 ${esc(p.project)} <span class="hint">inbox ${c.inbox||0} · processing ${c.processing||0} · done ${c.done||0} · rejected ${c.rejected||0}</span></div>
       <div class="specs"><span class="specs-label">especialistas:</span> ${specsHtml(p.specialists)}</div>
       <div class="flow proj-flow">
-        ${col('Inbox', sortInboxByTick(h.inbox), 'inbox', p.project)}
+        ${col('Inbox', sortInboxByWait(h.inbox), 'inbox', p.project)}
         ${col('Processing', h.processing, 'processing', p.project)}
         ${col('Done', h.done, 'done', p.project)}
       </div>`;
@@ -810,7 +798,7 @@ function clearHighlight() {
 
 function renderHandoffs(h, proj) {
   const idSet = buildIdSet(h);
-  renderColumn("inbox", sortInboxByTick(h.inbox), idSet, proj);
+  renderColumn("inbox", sortInboxByWait(h.inbox), idSet, proj);
   renderColumn("processing", h.processing, idSet, proj);
   renderColumn("done", h.done, idSet, proj);
   renderRejected(h.rejected, idSet, proj);
@@ -842,7 +830,7 @@ function render(state) {
     document.getElementById("busRoot").textContent = "(todos os projetos)";
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
       [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k =>
-        (k === "inbox" ? sortInboxByTick(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id).join(","))]));
+        (k === "inbox" ? sortInboxByWait(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     updateEtas();
     renderHolder(state.holder);
@@ -861,7 +849,7 @@ function render(state) {
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
   // inclui a ORDEM por proximo-tique na assinatura: re-renderiza (e re-ordena) quando a
   // ordem muda com o tempo (tique passou), nao so quando entra/sai handoff.
-  const inboxOrder = sortInboxByTick(h.inbox || []).map(it => it.id).join(",");
+  const inboxOrder = sortInboxByWait(h.inbox || []).map(it => it.id).join(",");
   const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
   if (sig !== lastHandoffSig) {
