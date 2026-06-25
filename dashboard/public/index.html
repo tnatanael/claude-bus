@@ -322,6 +322,8 @@
   .eta { font-family: var(--mono); font-size: 10px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.35); border-radius: 6px; padding: 1px 6px; }
   .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
   .eta.waiting { background: rgba(210,153,34,0.18); border-color: rgba(210,153,34,0.6); }
+  .eta.hide { display: none; }
+  .next-check { font-family: var(--mono); font-size: 11px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3); border-radius: 6px; padding: 1px 8px; margin-right: 4px; cursor: help; }
   .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .arm-dot.armed { background: var(--green); }
 .lockbar { margin: 8px 0 0; padding: 6px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; }
@@ -584,23 +586,28 @@ function updateEtas() {
   const nowMs = Date.now();
   const nextTick = Math.ceil((nowMs + 1) / TICK_MS) * TICK_MS;     // proximo multiplo de 5 min
   const remain = Math.max(0, Math.ceil((nextTick - nowMs) / 60000));
+  // Countdown GLOBAL (todos os crons */5 checam no mesmo tique; um so countdown basta).
+  document.querySelectorAll(".next-check").forEach(el => {
+    el.textContent = "⏱ próximo check ~" + remain + "m";
+    el.title = "Todos os especialistas checam o inbox a cada 5 min, no mesmo tique. O primeiro a pegar o lock global processa; os demais aguardam o próximo.";
+  });
+  // Por card: só o que VARIA — profundidade da fila ou destino offline (o tempo é global).
   document.querySelectorAll(".eta").forEach(el => {
     const to = el.getAttribute("data-to") || "destino";
     const sent = parseInt(el.getAttribute("data-sent"), 10);
     const armed = el.getAttribute("data-to-armed");               // "1" armado | "0" offline | "" desconhecido
     const waited = isNaN(sent) ? 0 : Math.max(0, Math.floor(nowMs / TICK_MS) - Math.floor(sent / TICK_MS));
     if (waited <= 0) {
-      el.className = "eta";
-      el.textContent = "⏱ ~" + remain + "m";
-      el.title = to + " processa no proximo tique (~" + remain + " min; cron a cada 5 min)";
+      el.className = "eta hide";                                   // ainda nao passou por tique: sem badge (o global ja diz quando)
+      el.textContent = "";
     } else if (armed === "0") {
       el.className = "eta late";
       el.textContent = "⚠ destino offline · " + waited + " tick" + (waited > 1 ? "s" : "");
       el.title = to + ": o cron do destino nao esta disparando (sessao fechada/parada). Ja sao " + waited + " tique(s) sem pickup — rode /bus nele.";
     } else {
       el.className = "eta waiting";
-      el.textContent = "⏳ " + waited + " na fila · ~" + remain + "m";
-      el.title = to + " esta na fila do lock global — passou por " + waited + " tique(s) com o lock ocupado (normal sob carga). Proxima tentativa ~" + remain + " min.";
+      el.textContent = "⏳ " + waited + " na fila";
+      el.title = to + " esta na fila do lock global — passou por " + waited + " tique(s) com o lock ocupado (normal sob carga).";
     }
   });
 }
@@ -661,7 +668,7 @@ function renderAll(projects) {
     const c = p.counts || {};
     return `
       <div class="section-title">📦 ${esc(p.project)} <span class="hint">inbox ${c.inbox||0} · processing ${c.processing||0} · done ${c.done||0} · rejected ${c.rejected||0}</span></div>
-      <div class="specs"><span class="specs-label">especialistas:</span> ${specsHtml(p.specialists)}</div>
+      <div class="specs"><span class="next-check"></span> <span class="specs-label">especialistas:</span> ${specsHtml(p.specialists)}</div>
       <div class="flow proj-flow">
         ${col('Inbox', sortInboxByWait(h.inbox), 'inbox', p.project)}
         ${col('Processing', h.processing, 'processing', p.project)}
@@ -844,7 +851,7 @@ function render(state) {
   const sp = document.getElementById("singleProj");
   if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
   const ss = document.getElementById("singleSpecs");
-  if (ss) ss.innerHTML = '<span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
+  if (ss) ss.innerHTML = '<span class="next-check"></span> <span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
   updateEtas();
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
   // inclui a ORDEM por proximo-tique na assinatura: re-renderiza (e re-ordena) quando a
