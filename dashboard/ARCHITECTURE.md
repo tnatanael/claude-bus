@@ -36,6 +36,7 @@ Sempre inclui `default`.
   "project": "acme",
   "busRoot": "<raiz do projeto>",
   "specialists": [{ "slug": "frontend", "cron": 11, "armed": true }, "..."],
+  "holder": { "slug": "frontend", "project": "acme", "since": "<iso>", "expiry": "<iso>" },
   "handoffs": { "inbox": [], "processing": [], "done": [], "rejected": [] },
   "counts": { "inbox": 0, "processing": 0, "done": 4, "rejected": 0 }
 }
@@ -43,10 +44,11 @@ Sempre inclui `default`.
 **Agrupado** (`project=all`):
 ```json
 { "now": 1719000000, "all": true,
+  "holder": { "slug": "frontend", "project": "acme", "since": "<iso>", "expiry": "<iso>" },
   "projects": [ { "project": "default", "specialists": [], "handoffs": {}, "counts": {} }, "..." ] }
 ```
-`specialists`: especialistas do projeto, cada um `{ slug, cron, armed }`. `cron` = minuto 0-59 do auto-recheck, **determinístico do sid** (soma dos bytes do sid mod 60). `armed` = o `/bus` da sessão foi visto nos últimos 90min (marcador `seen/<sid>`, regravado a cada `/bus`; como o cron dispara `/bus` de hora em hora, frescor ⇒ cron vivo). Lidos do `names/` + `seen/`. Os itens do `inbox` carregam `toCron` (cron do destino) pro countdown/atraso no card.
-Os itens do `inbox` ainda trazem `toCron` (minuto do cron do destino), que o front usa pro countdown `⏱ ~Nm` no card.
+`specialists`: especialistas do projeto, cada um `{ slug, cron, armed }`. `cron` = minuto 0-59 do auto-recheck, **determinístico do sid** (soma dos bytes do sid mod 60). `armed` = o `/bus` da sessão foi visto nos últimos 90min (marcador `seen/<sid>`, regravado a cada `/bus`; como o cron dispara `/bus` a cada 30 min, frescor ⇒ cron vivo). Lidos do `names/` + `seen/`. Os itens do `inbox` carregam `toCron` e `toCron2` (os dois minutos do cron do destino, `:M` e `:M+30`) pro countdown/atraso no card.
+**`holder`** (top-level, global — vale pros dois formatos): quem segura o **lock de concorrência** (`<base>/.bus-lock`, 1 por máquina; o limite de API é da conta, não do projeto) agora — `{ slug, project, since, expiry }`, ou `null` se livre/expirado. O `expiry` é o lease (auto-libera se a sessão cair).
 Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do arquivo
 `to-<to>__from-<from>__<id>.handoff` e do cabeçalho do corpo. Ordem: mais novo primeiro
 (o `id` é `YYYYMMDD-HHMMSS-xxxxxx`). O `done` já vem filtrado (24h, máx 20).
@@ -71,3 +73,4 @@ um com o **corpo puro** (texto entre `---` e `###BUS-END`). Ordenado por `id` (c
 - Popula o seletor via `/api/projects` e polla `/api/state?project=<selecionado>`.
 - **Projeto único** → flow completo com os conectores de resposta. **"Todos"** → uma
   seção por projeto (colunas, sem conectores).
+- **Lock**: linha no header com o `holder` ("Trabalhando agora: slug · lease expira ~Nm") + popover (`!`) explicando o lock. Chips ordenados por **MRU do lock** (último dono à esquerda; persiste em `localStorage`). Inbox ordenada pelo **próximo tick** do destino (mais próximo no topo). Filtro de projeto persiste no F5 (`localStorage`).

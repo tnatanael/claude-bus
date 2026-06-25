@@ -9,7 +9,8 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 - **Autenticação por token** — handoffs forjados vão pra quarentena (`rejected/`) antes de qualquer execução.
 - **Auto-nome por sessão** — define o slug 1× por sessão; religações são só `/bus`.
 - **Linha de despacho** — cada envio diz ao operador onde disparar o próximo `/bus`.
-- **Operação desassistida automática** — o `/bus` arma sozinho um recheck horário (cron de sessão, idempotente) pra processar handoffs quando você sai.
+- **Operação desassistida automática** — o `/bus` arma sozinho um recheck **a cada 30 min** (cron de sessão) pra processar handoffs quando você sai.
+- **Gate de concorrência (anti-overload, opcional)** — um hook serializa o trabalho disparado por `/bus` num **lock global** (1 por máquina): como o limite de requisições é da **conta** Claude (não do projeto), só um especialista trabalha por vez; os demais deferem **sem gastar API**, e checagens de inbox vazia ficam de graça. Setup na seção [Gate de concorrência](#gate-de-concorrência-opcional).
 
 ## Instalação
 
@@ -22,7 +23,7 @@ Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("es
 
 Em cada sessão que vai participar, rode **uma vez**: `/bus <slug> [projeto]` (ex.: `/bus backend acme`). O projeto isola o BUS — especialistas só veem/endereçam quem está no mesmo projeto (omitido = `default`). Depois, religar/rechecar é só `/bus` (ele lembra slug e projeto pela sessão).
 
-Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. O próprio `/bus` arma um recheck horário (cron de sessão, idempotente) que processa handoffs enquanto você está ausente.
+Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. O próprio `/bus` arma um recheck **a cada 30 min** (cron de sessão) que processa handoffs enquanto você está ausente.
 
 ## Plataformas
 
@@ -38,11 +39,24 @@ Sem dependências: usa o PowerShell do Windows e o bash do macOS/Linux.
 - **BUS** = pasta compartilhada entre as sessões: base `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix), override pela env `CLAUDE_BUS_ROOT`. O projeto `default` usa a base; um projeto `<p>` usa `<base>/<p>/` (cada um com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O registro `names/` fica na base (global).
 - Cada handoff é um arquivo `to-<destino>__from-<origem>__<id>.handoff`, escrito atomicamente e com um token de auth.
 - `/bus` chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido).
-- Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o cron horário de auto-recheck ticar).
+- Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o cron de auto-recheck, a cada 30 min, ticar).
+- **Gate de concorrência (opcional)** — um hook `UserPromptSubmit` (`bin/bus-gate.*`) filtra os `/bus` **antes da API**: defere sem custo se outro especialista segura o **lock global** (`<base>/.bus-lock`) ou se sua inbox está vazia; adquire o lock quando há trabalho pra você. O fim do `/bus` libera o lock (`bin/bus-lock.* --release`); um lease de 30 min é a rede de segurança. Setup abaixo.
+
+## Gate de concorrência (opcional)
+
+O limite de requisições da API é da **conta** Claude, não do projeto — várias sessões trabalhando em paralelo podem causar overload (429/"serviço ocupado"). O gate serializa o trabalho disparado por `/bus` num **lock único por máquina** (`<base>/.bus-lock`) e torna as checagens de inbox vazia **de graça** (bloqueia o `/bus` antes da API). É **opt-in**: registre o hook `UserPromptSubmit` no `settings.json` global (`~/.claude/settings.json`):
+
+```json
+{ "hooks": { "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "<comando>" } ] } ] } }
+```
+- **Windows:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<raiz>\bin\bus-gate.ps1"`
+- **macOS/Linux:** `bash "<raiz>/bin/bus-gate.sh"`
+
+O hook é **fail-open** (erro → deixa o prompt passar) e só age em `/bus`: grava o `seen` (prova de vida pro dashboard), defere (`exit 2`, **sem custo de API**) se o lock está ocupado ou a inbox vazia, e adquire o lock quando há handoff. O passo final do `/bus` libera o lock; um **lease de 30 min** cobre quedas de sessão. O dashboard mostra quem segura o lock ("Trabalhando agora"). Sem o hook, o BUS funciona normalmente — só sem a serialização anti-overload.
 
 ## Dashboard ao vivo (incluso)
 
-A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real, com **seletor de projeto** (um projeto isolado, ou "Todos" agrupado): handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, e os rejeitados por auth. É **estritamente somente leitura** sobre o BUS.
+A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real, com **seletor de projeto** (um projeto isolado, ou "Todos" agrupado): handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, os rejeitados por auth, e **quem segura o lock global agora** ("Trabalhando agora", com a expiração do lease). É **estritamente somente leitura** sobre o BUS.
 
 ```
 node dashboard/server.js   # http://localhost:7878 (porta via env PORT)
