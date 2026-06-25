@@ -841,7 +841,8 @@ function render(state) {
     all.style.display = "";
     document.getElementById("busRoot").textContent = "(todos os projetos)";
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
-      [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k => (p.handoffs[k]||[]).map(it => it.id).join(","))]));
+      [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k =>
+        (k === "inbox" ? sortInboxByTick(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     updateEtas();
     renderHolder(state.holder);
@@ -858,7 +859,10 @@ function render(state) {
   if (ss) ss.innerHTML = '<span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
   updateEtas();
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
-  const sig = "ONE|" + (state.project || "") + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
+  // inclui a ORDEM por proximo-tique na assinatura: re-renderiza (e re-ordena) quando a
+  // ordem muda com o tempo (tique passou), nao so quando entra/sai handoff.
+  const inboxOrder = sortInboxByTick(h.inbox || []).map(it => it.id).join(",");
+  const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
   if (sig !== lastHandoffSig) {
     lastHandoffSig = sig;
