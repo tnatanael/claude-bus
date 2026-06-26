@@ -228,6 +228,15 @@
   .column.inbox h3 { color: var(--blue); }
   .column.processing h3 { color: var(--amber); }
   .column.done h3 { color: var(--green); }
+  /* faixa de cor no topo + leve tint por status (reforca o "zoneamento" de cor) */
+  .column.inbox { border-top: 2px solid rgba(56,139,253,.55); background: linear-gradient(rgba(56,139,253,.06), rgba(56,139,253,0) 80px), var(--panel); }
+  .column.processing { border-top: 2px solid rgba(210,153,34,.55); background: linear-gradient(rgba(210,153,34,.06), rgba(210,153,34,0) 80px), var(--panel); }
+  .column.done { border-top: 2px solid rgba(46,160,67,.5); background: linear-gradient(rgba(46,160,67,.05), rgba(46,160,67,0) 80px), var(--panel); }
+  /* count como pilula colorida por status */
+  .column h3 .count { padding: 0 7px; border-radius: 10px; font-size: 11px; background: rgba(255,255,255,.06); }
+  .column.inbox h3 .count { background: rgba(56,139,253,.2); }
+  .column.processing h3 .count { background: rgba(210,153,34,.2); }
+  .column.done h3 .count { background: rgba(46,160,67,.2); }
 
   .handoff {
     position: relative;
@@ -262,6 +271,7 @@
   .handoff .route .prio { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 6px; margin-left: 2px; align-self: center; }
   .handoff .route .prio.low { color: #6ea8fe; background: rgba(110,168,254,.14); border: 1px solid rgba(110,168,254,.35); }
   .handoff .route .prio.high { color: var(--amber); background: rgba(210,153,34,.16); border: 1px solid rgba(210,153,34,.4); }
+  .handoff .route .prio.def { color: var(--grey); background: rgba(255,255,255,.04); border: 1px solid var(--border); }
   .handoff .id {
     font-family: var(--mono);
     font-size: 10.5px;
@@ -536,10 +546,11 @@ function handoffCard(it, idSet, proj) {
   // Eta no inbox (o server marca it.tick nos itens do inbox). data-to-armed distingue
   // "na fila" (cron do destino vivo) de "destino offline" (cron morto).
   const etaTag = it.tick ? `<span class="eta" data-to="${esc(it.to)}" data-to-armed="${it.toArmed === false ? "0" : (it.toArmed === true ? "1" : "")}" data-sent="${idToEpoch(it.id)}"></span>` : "";
-  // prioridade do destino (badge so quando != 1000: <1000 cede a vez, >1000 fura a fila)
-  const prioTag = (it.toPrio != null && it.toPrio !== 1000)
-    ? `<span class="prio ${it.toPrio < 1000 ? "low" : "high"}" title="prioridade do destino ${esc(it.to)}: ${it.toPrio} (default 1000 — menor cede a vez, maior fura a fila)">${it.toPrio < 1000 ? "↓" : "↑"}${it.toPrio}</span>`
-    : "";
+  // prioridade do destino (badge sempre; <1000 cede a vez, =1000 default, >1000 fura a fila)
+  const tp = (it.toPrio == null ? 1000 : it.toPrio);
+  const prioCls = tp < 1000 ? "low" : (tp > 1000 ? "high" : "def");
+  const prioArrow = tp < 1000 ? "↓" : (tp > 1000 ? "↑" : "");
+  const prioTag = `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
       <div class="route">
@@ -577,11 +588,11 @@ function specsHtml(specs) {
   }).join("");
 }
 
-// Inbox ordenada por TEMPO DE ESPERA: mais antigo (mais tempo na fila do lock) no topo.
-// Com cron */5 (a cada 5 min, sem spread por-sid) o "proximo tique" e igual pra todos os
-// destinos, entao ordenar por isso nao ajuda; ordenamos por idade do handoff (id cronologico).
+// Inbox ordenada por PRIORIDADE do destino (primaria, maior em cima = processa antes;
+// PO/low-prio afunda) e, dentro da mesma prioridade, por TEMPO DE ESPERA (mais antigo no topo).
 function sortInboxByWait(items) {
-  return (items || []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const p = it => (it.toPrio == null ? 1000 : it.toPrio);
+  return (items || []).slice().sort((a, b) => (p(b) - p(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 // O cron de auto-recheck dispara a cada 5 min (:00,:05,:10,...). O card do inbox mostra:
