@@ -8,8 +8,9 @@
 #   - inbox vazia e seen velho (>3h, possivel pos-restart) -> exit 0 (deixa re-armar o cron)
 #   - inbox vazia e seen fresco                            -> exit 2 (skip de graca)
 # Sempre regrava seen/<sid> (prova de vida pro dashboard). Fail-open: erro -> exit 0.
-# NAO TESTADO no Unix ainda -- validar (parsing JSON via sed assume prompts simples; o
-# lock guarda exp_epoch p/ comparacao numerica e expiry ISO p/ o dashboard).
+# O acquire do lock e ATOMICO (noclobber/O_EXCL, par do CreateNew/FileShare.None do .ps1).
+# Demais partes best-effort no Unix -- validar (parsing JSON via sed assume prompts simples;
+# o lock guarda exp_epoch p/ comparacao numerica e expiry ISO p/ o dashboard).
 SEEN_STALE_MIN=180
 LEASE_MIN=30
 
@@ -94,9 +95,12 @@ main() {
     iso_now="$(date -d "@$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$now")"
     iso_exp="$(date -d "@$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$exp")"
     obj="{\"sid\":\"$sid\",\"slug\":\"$slug\",\"project\":\"$project\",\"since\":\"$iso_now\",\"expiry\":\"$iso_exp\",\"exp_epoch\":$exp}"
-    if [ ! -f "$lock" ]; then
-      printf '%s' "$obj" > "$lock" && exit 0
+    # acquire ATOMICO: noclobber faz '>' usar O_EXCL (cria so se nao existir, sem TOCTOU);
+    # par do CreateNew/FileShare.None do .ps1.
+    if ( set -o noclobber; printf '%s' "$obj" > "$lock" ) 2>/dev/null; then
+      exit 0
     fi
+    # ja existe: rouba so se for MEU ou EXPIRADO
     lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
     if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; }; then
