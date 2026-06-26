@@ -611,23 +611,22 @@ function updateEtas() {
     el.textContent = "⏱ próximo check " + remTxt;
     el.title = "Todos os especialistas checam o inbox a cada 1 min, no mesmo tique. O primeiro a pegar o lock global processa; os demais aguardam o próximo.";
   });
-  // Por card: só o que VARIA — profundidade da fila ou destino offline (o tempo é global).
+  // Por card: TIMER de quanto tempo o handoff esta na fila (desde que chegou no inbox).
   document.querySelectorAll(".eta").forEach(el => {
     const to = el.getAttribute("data-to") || "destino";
     const sent = parseInt(el.getAttribute("data-sent"), 10);
     const armed = el.getAttribute("data-to-armed");               // "1" armado | "0" offline | "" desconhecido
-    const waited = isNaN(sent) ? 0 : Math.max(0, Math.floor(nowMs / TICK_MS) - Math.floor(sent / TICK_MS));
-    if (waited <= 0) {
-      el.className = "eta hide";                                   // ainda nao passou por tique: sem badge (o global ja diz quando)
-      el.textContent = "";
-    } else if (armed === "0") {
+    const elapsed = isNaN(sent) ? 0 : Math.max(0, Math.floor((nowMs - sent) / 1000));
+    const em = Math.floor(elapsed / 60), es = elapsed % 60;
+    const ago = em > 0 ? (em + "m " + es + "s") : (es + "s");
+    if (armed === "0") {
       el.className = "eta late";
-      el.textContent = "⚠ destino offline · " + waited + " tick" + (waited > 1 ? "s" : "");
-      el.title = to + ": o cron do destino nao esta disparando (sessao fechada/parada). Ja sao " + waited + " tique(s) sem pickup — rode /bus nele.";
+      el.textContent = "⚠ destino offline · há " + ago;
+      el.title = to + ": o cron do destino nao esta disparando (sessao fechada/parada). Na fila ha " + ago + " — rode /bus nele.";
     } else {
       el.className = "eta waiting";
-      el.textContent = "⏳ " + waited + " na fila";
-      el.title = to + " esta na fila do lock global — passou por " + waited + " tique(s) com o lock ocupado (normal sob carga).";
+      el.textContent = "⏳ na fila há " + ago;
+      el.title = to + " ainda nao pegou este handoff (aguardando o proximo tique / lock livre) ha " + ago + ".";
     }
   });
 }
