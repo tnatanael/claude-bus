@@ -54,6 +54,18 @@ O limite de requisições da API é da **conta** Claude, não do projeto — vá
 
 O hook é **fail-open** (erro → deixa o prompt passar) e só age em `/bus`: grava o `seen` (prova de vida pro dashboard), defere (`exit 2`, **sem custo de API**) se o lock está ocupado ou a inbox vazia, e adquire o lock quando há handoff. O passo final do `/bus` libera o lock; um **lease de 30 min** cobre quedas de sessão. O dashboard mostra quem segura o lock ("Trabalhando agora"). Sem o hook, o BUS funciona normalmente — só sem a serialização anti-overload.
 
+### Dica: o PO/coordenador processa por último
+
+Se um projeto tem um **PO/coordenador** (a sessão que fan-out o trabalho e recebe os retornos), vale marcá-lo como **prioridade baixa**: o gate o faz **ceder a vez** — ele só adquire o lock e processa o próprio inbox quando **nenhum outro especialista do projeto** tem handoff pendente. Assim os especialistas terminam primeiro e o PO **consolida no fim**, em vez de competir pelo lock no meio do fluxo.
+
+Crie `<raiz-do-projeto>/.lowprio` com o(s) slug(s), **um por linha**. Ex. (projeto `acme`, base `/tmp/claude-bus`):
+
+```
+echo po > /tmp/claude-bus/acme/.lowprio
+```
+
+(No projeto `default`, a raiz é a própria base: `<base>/.lowprio`.) O gate lê isso pré-LLM — sem reinício, vale no próximo `/bus`. **Atenção a starvation:** num projeto sempre cheio de handoffs, o PO pode esperar bastante (é o comportamento desejado — "só quando ninguém mais tiver"); se incomodar, dá pra adicionar um teto de espera.
+
 ## Dashboard ao vivo (incluso)
 
 A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real, com **seletor de projeto** (um projeto isolado, ou "Todos" agrupado): handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, os rejeitados por auth, e **quem segura o lock global agora** ("Trabalhando agora", com a expiração do lease). É **estritamente somente leitura** sobre o BUS.
