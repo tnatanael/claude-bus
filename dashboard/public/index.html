@@ -259,6 +259,9 @@
   .handoff .route .from { font-weight: 500; color: var(--muted); font-size: 0.9em; }
   .handoff .route .ar { color: var(--muted); }
   .handoff .route .to { color: var(--accent); font-weight: 700; font-size: 1.2em; }
+  .handoff .route .prio { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 6px; margin-left: 2px; align-self: center; }
+  .handoff .route .prio.low { color: #6ea8fe; background: rgba(110,168,254,.14); border: 1px solid rgba(110,168,254,.35); }
+  .handoff .route .prio.high { color: var(--amber); background: rgba(210,153,34,.16); border: 1px solid rgba(210,153,34,.4); }
   .handoff .id {
     font-family: var(--mono);
     font-size: 10.5px;
@@ -533,12 +536,16 @@ function handoffCard(it, idSet, proj) {
   // Eta no inbox (o server marca it.tick nos itens do inbox). data-to-armed distingue
   // "na fila" (cron do destino vivo) de "destino offline" (cron morto).
   const etaTag = it.tick ? `<span class="eta" data-to="${esc(it.to)}" data-to-armed="${it.toArmed === false ? "0" : (it.toArmed === true ? "1" : "")}" data-sent="${idToEpoch(it.id)}"></span>` : "";
+  // prioridade do destino (badge so quando != 1000: <1000 cede a vez, >1000 fura a fila)
+  const prioTag = (it.toPrio != null && it.toPrio !== 1000)
+    ? `<span class="prio ${it.toPrio < 1000 ? "low" : "high"}" title="prioridade do destino ${esc(it.to)}: ${it.toPrio} (default 1000 — menor cede a vez, maior fura a fila)">${it.toPrio < 1000 ? "↓" : "↑"}${it.toPrio}</span>`
+    : "";
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
       <div class="route">
         <span class="from">${esc(it.from)}</span>
         <span class="ar">→</span>
-        <span class="to">${esc(it.to)}</span>
+        <span class="to">${esc(it.to)}</span>${prioTag}
       </div>
       <div class="id">${esc(it.id)}</div>
       <div class="tags">${replyTag}${linkTag}${etaTag}</div>

@@ -265,15 +265,28 @@ function queryParam(reqUrl, key) {
 
 // project='all' -> grouped { now, all:true, projects:[{project,handoffs,counts}] }
 // project=<p>   -> single  { now, project, busRoot, handoffs, counts }
-// Metadados de exibicao nos itens do INBOX: it.tick=true (o front mostra o eta no card) e
-// it.toArmed = se o cron do destino esta vivo (seen fresco). Com cron */5 (a cada 5 min)
-// o eta vira intervalo fixo; toArmed distingue "na fila" (lock ocupado) de "destino offline".
-function attachToCron(handoffs, specs) {
+// Prioridades do projeto (arquivo <projroot>/.priority, linhas "slug:N"; default 1000).
+function readPriorities(root) {
+  const map = {};
+  const raw = safeReadText(path.join(root || BUS_ROOT, '.priority'));
+  if (raw) for (const ln of raw.split(/\r?\n/)) {
+    const i = ln.indexOf(':');
+    if (i > 0) { const s = ln.slice(0, i).trim(); const n = parseInt(ln.slice(i + 1).trim(), 10); if (s && !isNaN(n)) map[s] = n; }
+  }
+  return map;
+}
+
+// Metadados de exibicao nos itens do INBOX: it.tick=true (o front mostra o eta no card),
+// it.toArmed = se o cron do destino esta vivo (seen fresco), it.toPrio = prioridade do
+// destino (default 1000; o front mostra badge quando != 1000).
+function attachToCron(handoffs, specs, projRoot) {
   const armedMap = {};
   for (const s of (specs || [])) if (!(s.slug in armedMap)) armedMap[s.slug] = !!s.armed;
+  const prio = readPriorities(projRoot);
   for (const it of (handoffs.inbox || [])) {
     it.tick = true;
     it.toArmed = (it.to in armedMap) ? armedMap[it.to] : null;   // null = destino nao registrado
+    it.toPrio = (it.to in prio) ? prio[it.to] : 1000;
   }
 }
 
@@ -297,7 +310,7 @@ function buildPayload(p) {
     const now = Math.floor(Date.now() / 1000);
     const projects = listProjects().map(name => {
       const st = buildState(projectRoot(name));
-      attachToCron(st.handoffs, roster[name] || []);
+      attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
       return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts };
     });
     return { now, all: true, projects, holder: readLockHolder() };
@@ -305,7 +318,7 @@ function buildPayload(p) {
   const st = buildState(projectRoot(p));
   st.project = p;
   st.specialists = roster[p] || [];
-  attachToCron(st.handoffs, roster[p] || []);
+  attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
   st.holder = readLockHolder();
   return st;
 }
