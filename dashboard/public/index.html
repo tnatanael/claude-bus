@@ -595,21 +595,21 @@ function sortInboxByWait(items) {
   return (items || []).slice().sort((a, b) => (p(b) - p(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-// O cron de auto-recheck dispara a cada 5 min (:00,:05,:10,...). O card do inbox mostra:
+// O cron de auto-recheck dispara a cada 1 min (:00,:01,:02,...). O card do inbox mostra:
 //  - "⏱ ~Nm": countdown ate o proximo tique (ainda nao passou por nenhum);
 //  - "⏳ N na fila": ja passou por N tiques sem ser pego -> lock estava ocupado (NORMAL);
 //  - "⚠ destino offline": o cron do destino nem esta disparando (seen velho = nao armado).
-const TICK_MS = 5 * 60 * 1000;
+const TICK_MS = 1 * 60 * 1000;
 function updateEtas() {
   const nowMs = Date.now();
-  const nextTick = Math.ceil((nowMs + 1) / TICK_MS) * TICK_MS;     // proximo multiplo de 5 min
-  // Countdown GLOBAL (todos os crons */5 checam no mesmo tique; um so countdown basta).
+  const nextTick = Math.ceil((nowMs + 1) / TICK_MS) * TICK_MS;     // proximo multiplo de 1 min
+  // Countdown GLOBAL (todos os crons */1 checam no mesmo tique; um so countdown basta).
   // Formato min+seg, igual o painel de loop do harness ("3 min 29 s").
   const remSec = Math.max(0, Math.floor((nextTick - nowMs) / 1000));
   const remTxt = remSec >= 60 ? (Math.floor(remSec / 60) + " min " + (remSec % 60) + " s") : (remSec + " s");
   document.querySelectorAll(".next-check").forEach(el => {
     el.textContent = "⏱ próximo check " + remTxt;
-    el.title = "Todos os especialistas checam o inbox a cada 5 min, no mesmo tique. O primeiro a pegar o lock global processa; os demais aguardam o próximo.";
+    el.title = "Todos os especialistas checam o inbox a cada 1 min, no mesmo tique. O primeiro a pegar o lock global processa; os demais aguardam o próximo.";
   });
   // Por card: só o que VARIA — profundidade da fila ou destino offline (o tempo é global).
   document.querySelectorAll(".eta").forEach(el => {

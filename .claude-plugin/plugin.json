@@ -1,7 +1,7 @@
 {
   "name": "bus",
-  "version": "0.6.16",
-  "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO (modelo pull, sem monitor): /bus <slug> [projeto] processa o inbox na hora; projetos isolados; auth por token; auto-nome por sessao; auto-recheck a cada 5min (cron */5); gate de concorrencia PRE-API (hook UserPromptSubmit + lock global) p/ evitar overload da conta; dashboard por projeto. Cross-platform (Windows PowerShell / macOS + Linux bash).",
+  "version": "0.6.17",
+  "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO (modelo pull, sem monitor): /bus <slug> [projeto] processa o inbox na hora; projetos isolados; auth por token; auto-nome por sessao; auto-recheck a cada 1min (cron */1); gate de concorrencia PRE-API (hook UserPromptSubmit + lock global) p/ evitar overload da conta; prioridade por especialista; dashboard por projeto. Cross-platform (Windows PowerShell / macOS + Linux bash).",
   "author": { "name": "tnatanael" },
   "homepage": "https://github.com/tnatanael/claude-bus",
   "repository": "https://github.com/tnatanael/claude-bus",
