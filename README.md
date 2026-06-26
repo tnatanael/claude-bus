@@ -2,7 +2,9 @@
 
 Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("especialistas"). Cada sessão vira um especialista; eles trocam **handoffs** por um BUS de arquivos.
 
-**Modelo pull (sem monitor de fundo).** Você roda `/bus` numa sessão e ela processa na hora os handoffs pendentes pra ela. Quem envia termina com uma linha de despacho (`📨 Handoffs para: x, y, z`) dizendo onde rodar `/bus` em seguida. Versões anteriores usavam um monitor autônomo em background; ele foi removido — gastava token à toa e morria em silêncio quando o host matava o processo. Pull é simples, confiável e tem **custo ocioso zero**.
+**Como funciona.** Você registra uma sessão como especialista (`/bus <slug> [projeto]`) e ela processa os handoffs endereçados a ela. Isso dispara de dois jeitos: você rodando `/bus` **manualmente**, ou o **auto-recheck** — um cron de sessão (a cada 1 min) que o próprio `/bus` arma e que re-checa o inbox sozinho **enquanto a sessão está aberta**. Quem envia um handoff termina o turno com uma **linha de despacho** (`📨 Handoffs para: x, y, z`) apontando onde há trabalho.
+
+Não existe **daemon nem processo de fundo separado**: o auto-recheck é a própria sessão se reacordando pelo agendador do harness (in-harness) — some limpo quando a sessão fecha, sem processo órfão pra vazar. Pra que essa recheca de minuto em minuto **não acorde o modelo à toa**, ative o **gate de concorrência** (opcional, [abaixo](#gate-de-concorrência-opcional)): ele **defere os ticks vazios ou bloqueados antes da API** — custo de token zero quando não há trabalho — e ainda serializa o trabalho entre todas as sessões.
 
 - **Escopo de projeto** — `/bus <slug> [projeto]` isola cada frente; você só vê e endereça especialistas do mesmo projeto (omitido = `default`).
 - **Processamento on-demand** — `/bus` lê o inbox, valida o token, executa os handoffs e arquiva.
@@ -39,7 +41,7 @@ Sem dependências: usa o PowerShell do Windows e o bash do macOS/Linux.
 - **BUS** = pasta compartilhada entre as sessões: base `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix), override pela env `CLAUDE_BUS_ROOT`. O projeto `default` usa a base; um projeto `<p>` usa `<base>/<p>/` (cada um com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O registro `names/` fica na base (global).
 - Cada handoff é um arquivo `to-<destino>__from-<origem>__<id>.handoff`, escrito atomicamente e com um token de auth.
 - `/bus` chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido).
-- Não há processo de fundo, presença ou heartbeat: uma sessão só age quando você roda `/bus` nela (ou o cron de auto-recheck, a cada 1 min, ticar).
+- Não há **daemon separado**, presença nem heartbeat: o que reacorda uma sessão é você rodando `/bus` **ou** o cron de auto-recheck dela (a cada 1 min, só enquanto a sessão está aberta). O cron é in-harness — re-invoca a própria sessão e some quando o app fecha; nada de processo órfão.
 - **Gate de concorrência (opcional)** — um hook `UserPromptSubmit` (`bin/bus-gate.*`) filtra os `/bus` **antes da API**: defere sem custo se outro especialista segura o **lock global** (`<base>/.bus-lock`) ou se sua inbox está vazia; adquire o lock quando há trabalho pra você. O fim do `/bus` libera o lock (`bin/bus-lock.* --release`); um lease de 30 min é a rede de segurança. Setup abaixo.
 
 ## Gate de concorrência (opcional)
