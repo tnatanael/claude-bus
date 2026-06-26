@@ -12,6 +12,7 @@ try {
       try { $L = (Get-Content -LiteralPath $lock -Raw) | ConvertFrom-Json } catch {}
       if ($L -and $L.sid -eq $sid) {
         Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+        try { [System.IO.File]::AppendAllText((Join-Path $base '.bus-gate.log'), ("{0}`trelease`t{1}`t{2}`r`n" -f ([datetimeoffset]::Now.ToString('o')), $sid.Substring(0,[Math]::Min(8,$sid.Length)), [string]$L.slug), (New-Object System.Text.UTF8Encoding($false))) } catch {}
         Write-Output 'LOCK_RELEASED'
       } else {
         Write-Output 'LOCK_NOT_MINE'

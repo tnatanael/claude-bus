@@ -12,7 +12,12 @@ while [ $# -gt 0 ]; do case "$1" in --release|-Release) release=1;; esac; shift;
 if [ "$release" = "1" ]; then
   if [ -f "$lock" ] && [ -n "$sid" ]; then
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
-    if [ "$lsid" = "$sid" ]; then rm -f "$lock"; echo 'LOCK_RELEASED'; else echo 'LOCK_NOT_MINE'; fi
+    lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock")"
+    if [ "$lsid" = "$sid" ]; then
+      rm -f "$lock"
+      printf '%s\trelease\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" "$(printf '%s' "$sid" | cut -c1-8)" "$lslug" >> "$base/.bus-gate.log" 2>/dev/null || true
+      echo 'LOCK_RELEASED'
+    else echo 'LOCK_NOT_MINE'; fi
   else
     echo 'LOCK_ABSENT'
   fi

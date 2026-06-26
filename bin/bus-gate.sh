@@ -14,6 +14,15 @@
 SEEN_STALE_MIN=180
 LEASE_MIN=30
 
+# Forense: acquire/steal/defer-race vao pra <base>/.bus-gate.log (best-effort, nunca quebra).
+# (Bash nao tem o fail-open por-excecao do .ps1: aqui um erro nao vira "exit 0 sem lock" -- o
+# fluxo so segue, e o acquire ja e atomico via noclobber. Logo nao ha catch a blindar.)
+buslog() {  # $1=base $2=sid $3=slug $4=decision
+  lf="$1/.bus-gate.log"
+  { [ -f "$lf" ] && [ "$(wc -c < "$lf" 2>/dev/null || echo 0)" -gt 524288 ] && : > "$lf"; } 2>/dev/null
+  printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" "$4" "$(printf '%s' "$2" | cut -c1-8)" "$3" >> "$lf" 2>/dev/null || true
+}
+
 main() {
   raw="$(cat)"
   prompt="$(printf '%s' "$raw" | sed -n 's/.*"prompt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
@@ -98,15 +107,17 @@ main() {
     # acquire ATOMICO: noclobber faz '>' usar O_EXCL (cria so se nao existir, sem TOCTOU);
     # par do CreateNew/FileShare.None do .ps1.
     if ( set -o noclobber; printf '%s' "$obj" > "$lock" ) 2>/dev/null; then
+      buslog "$base" "$sid" "$slug" acquire
       exit 0
     fi
     # ja existe: rouba so se for MEU ou EXPIRADO
     lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
     if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; }; then
-      printf '%s' "$obj" > "$lock"; exit 0
+      printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" acquire-steal; exit 0
     fi
     echo 'BUS: lock tomado na corrida -- deferido.' >&2
+    buslog "$base" "$sid" "$slug" defer-race
     exit 2
   fi
 

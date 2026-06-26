@@ -10,16 +10,30 @@
 #   - inbox vazia e seen velho (>3h, possivel pos-restart)-> exit 0 (deixa re-armar o cron)
 #   - inbox vazia e seen fresco                           -> exit 2 (skip de graca)
 # Sempre regrava seen/<sid> (prova de vida pro dashboard, mesmo deferindo).
-# Fail-open: qualquer erro -> exit 0 (NUNCA trava um prompt real).
+# Fail-open BLINDADO: erro inesperado NAO trava prompt nao-/bus; mas pra /bus de sessao
+# conhecida, tenta ADQUIRIR o lock mesmo apos o erro -- se outro o segura (fresco) defere
+# (nao sobrepoe), senao adquire e passa COM o lock. Preserva o invariante mesmo sob falha.
+# Forense: acquire/steal/defer-race/fail-open vao pra <base>/.bus-gate.log (best-effort).
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
 $LEASE_MIN      = 30      # lease bootstrap; o modelo pode refinar p/ estimate dentro do turno
+
+function BusLog($base, $sid, $slug, $decision) {
+  # append best-effort ao log forense; NUNCA lanca (logar nao pode afetar o gate).
+  try {
+    $lf = Join-Path $base '.bus-gate.log'
+    try { $fi = Get-Item -LiteralPath $lf -ErrorAction SilentlyContinue; if ($fi -and $fi.Length -gt 524288) { Remove-Item -LiteralPath $lf -Force -ErrorAction SilentlyContinue } } catch {}
+    $sidShort = if ($sid) { $sid.Substring(0, [Math]::Min(8, $sid.Length)) } else { '-' }
+    $line = ("{0}`t{1}`t{2}`t{3}" -f ([datetimeoffset]::Now.ToString('o')), $decision, $sidShort, $slug)
+    [System.IO.File]::AppendAllText($lf, $line + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+  } catch {}
+}
 
 try {
   $raw = [Console]::In.ReadToEnd()
   $data = $null
   try { $data = $raw | ConvertFrom-Json } catch {}
-  $prompt = ''; $sid = ''
+  $prompt = ''; $sid = ''; $slug = ''; $project = ''
   if ($data) { $prompt = [string]$data.prompt; $sid = [string]$data.session_id }
 
   # 1. So gateia /bus. Qualquer outro prompt passa na hora (fast-path, custo ~0).
@@ -33,7 +47,6 @@ try {
   $nameFile = Join-Path (Join-Path $base 'names') ($sid + '.txt')
   if (-not (Test-Path -LiteralPath $nameFile)) { exit 0 }   # nao registrado -> deixa registrar
   $nl = @(Get-Content -LiteralPath $nameFile)
-  $project = ''; $slug = ''
   if ($nl.Count -ge 2) { $project = $nl[0].Trim(); $slug = $nl[1].Trim() }
   elseif ($nl.Count -eq 1) { $project = 'default'; $slug = $nl[0].Trim() }
   if (-not $slug) { exit 0 }
@@ -105,7 +118,7 @@ try {
     # acquire: cria exclusivo; se ja existe e e MEU ou EXPIRADO, sobrescreve (steal).
     $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
     $enc = New-Object System.Text.UTF8Encoding($false)
-    $acquired = $false
+    $acquired = $false; $how = 'acquire'
     try {
       $fs = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
       $b = [System.Text.Encoding]::UTF8.GetBytes($obj); $fs.Write($b,0,$b.Length); $fs.Close(); $acquired = $true
@@ -114,12 +127,13 @@ try {
         $L2 = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
         $exp2 = [datetimeoffset]::Parse($L2.expiry)
         if ($L2.sid -eq $sid -or $now -ge $exp2) {
-          [System.IO.File]::WriteAllText($lockFile, $obj, $enc); $acquired = $true
+          [System.IO.File]::WriteAllText($lockFile, $obj, $enc); $acquired = $true; $how = 'acquire-steal'
         }
       } catch {}
     }
-    if ($acquired) { exit 0 }
+    if ($acquired) { BusLog $base $sid $slug $how; exit 0 }
     [Console]::Error.WriteLine('BUS: lock tomado na corrida -- deferido.')
+    BusLog $base $sid $slug 'defer-race'
     exit 2
   }
 
@@ -129,5 +143,30 @@ try {
   exit 2
 
 } catch {
-  exit 0   # fail-open
+  # Fail-open BLINDADO. Nunca trava prompt nao-/bus nem sem sid. Mas pra /bus de sessao
+  # conhecida: tenta ADQUIRIR o lock mesmo apos o erro; se outro o segura (fresco) -> defere
+  # (nao sobrepoe); senao adquire e passa COM o lock. Preserva o invariante mesmo sob falha.
+  $base2 = $env:CLAUDE_BUS_ROOT; if (-not $base2) { $base2 = Join-Path $env:TEMP 'claude-bus' }
+  try {
+    if ($prompt -match '(?im)^\s*/bus(\s|$)' -and $sid) {
+      $lf = Join-Path $base2 '.bus-lock'; $nw = [datetimeoffset]::Now
+      $obj2 = (@{ sid=$sid; slug=$slug; project=$project; since=$nw.ToString('o'); expiry=$nw.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
+      $enc2 = New-Object System.Text.UTF8Encoding($false); $got = $false
+      try {
+        $fx = [System.IO.File]::Open($lf, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $bx = [System.Text.Encoding]::UTF8.GetBytes($obj2); $fx.Write($bx,0,$bx.Length); $fx.Close(); $got = $true
+      } catch {
+        try {
+          $LX = (Get-Content -LiteralPath $lf -Raw) | ConvertFrom-Json
+          if ($LX.sid -eq $sid -or $nw -ge ([datetimeoffset]::Parse($LX.expiry))) {
+            [System.IO.File]::WriteAllText($lf, $obj2, $enc2); $got = $true
+          }
+        } catch {}
+      }
+      if ($got) { BusLog $base2 $sid $slug 'failopen-acquire'; exit 0 }
+      BusLog $base2 $sid $slug 'failopen-defer'; exit 2
+    }
+  } catch {}
+  BusLog $base2 $sid $slug 'failopen-pass'
+  exit 0
 }

@@ -52,7 +52,7 @@ O limite de requisições da API é da **conta** Claude, não do projeto — vá
 - **Windows:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<raiz>\bin\bus-gate.ps1"`
 - **macOS/Linux:** `bash "<raiz>/bin/bus-gate.sh"`
 
-O hook é **fail-open** (erro → deixa o prompt passar) e só age em `/bus`: grava o `seen` (prova de vida pro dashboard), defere (`exit 2`, **sem custo de API**) se o lock está ocupado ou a inbox vazia, e adquire o lock quando há handoff. O passo final do `/bus` libera o lock; um **lease de 30 min** cobre quedas de sessão. O dashboard mostra quem segura o lock ("Trabalhando agora"). Sem o hook, o BUS funciona normalmente — só sem a serialização anti-overload.
+O hook é **fail-open blindado** (erro inesperado nunca trava um prompt; mas num `/bus` ele ainda **tenta adquirir o lock após o erro** — se outro o segura, **defere em vez de sobrepor**, preservando a serialização mesmo sob falha) e só age em `/bus`: grava o `seen` (prova de vida pro dashboard), defere (`exit 2`, **sem custo de API**) se o lock está ocupado ou a inbox vazia, e adquire o lock quando há handoff. O passo final do `/bus` libera o lock; um **lease de 30 min** cobre quedas de sessão. Cada decisão relevante (`acquire`/`acquire-steal`/`defer-race`/`failopen-*`/`release`) vai pra `<base>/.bus-gate.log` (log forense, best-effort, auto-limita em ~512 KB). O dashboard mostra quem segura o lock ("Trabalhando agora"). Sem o hook, o BUS funciona normalmente — só sem a serialização anti-overload.
 
 ### Dica: o PO/coordenador processa por último
 
