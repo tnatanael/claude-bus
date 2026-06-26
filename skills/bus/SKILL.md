@@ -16,7 +16,7 @@ Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude C
 
 | Operação | Windows | macOS / Linux |
 |---|---|---|
-| **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Set <slug> -Project <proj>` | `bash "$ROOT/bin/bus-name.sh" <slug> <proj>` |
+| **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Set <slug> -Project <proj> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <slug> <proj> [prioridade]` |
 | **nome — ler** | `PS "$ROOT\bin\bus-name.ps1"` | `bash "$ROOT/bin/bus-name.sh"` |
 | **ler inbox** | `PS "$ROOT\bin\bus-inbox.ps1" -Me <slug> -Project <proj>` | `bash "$ROOT/bin/bus-inbox.sh" --me <slug> --project <proj>` |
 | **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <proj> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <proj> [--reply] [--in-reply-to <id>]` |
@@ -29,7 +29,7 @@ Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude C
 Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (ambos nativos).
 
 ## 1. Quem você é (projeto + slug)
-1. **Veio slug** (1º arg após `/bus`) → grave (2º arg = projeto; omitido = `default`) via *nome — gravar*.
+1. **Veio slug** (1º arg após `/bus`) → grave (2º arg = projeto, omitido = `default`; 3º arg opcional = **prioridade** 0–1000, default 1000, menor cede mais) via *nome — gravar*.
 2. **Veio vazio** → *nome — ler*: retornou `PROJECT=/SLUG=/BUS_CRON_MINUTE=` → use direto (religação); `NONE` → **pergunte** o slug (e projeto) e grave.
 Guarde **SLUG**, **PROJECT** e **BUS_CRON_MINUTE**. Passe o `PROJECT` aos comandos via `-Project`/`--project` (nada de caminho manual).
 
@@ -66,7 +66,7 @@ Registre o hook **`UserPromptSubmit`** no `settings.json` (global: `~/.claude/se
 
 O hook é **fail-open** (qualquer erro → deixa passar) e só age em prompts `/bus`: grava o `seen` (prova de vida pro dashboard), defere (`exit 2`, sem custo de API) se outro segura o lock ou se sua inbox está vazia, e adquire o lock quando há handoff pra você. O passo 7 do `/bus` libera o lock; um **lease de 30 min** é a rede de segurança se a sessão cair. O dashboard mostra quem segura o lock ("Trabalhando agora").
 
-**Prioridade baixa (PO/coordenador):** crie `<raiz-do-projeto>/.lowprio` com o slug (1 por linha) pra marcar um especialista como *low-prio*. O gate o faz **ceder a vez** — ele só adquire o lock e processa o próprio inbox quando **nenhum outro especialista do projeto** tem handoff pendente (consolida **por último**). Bom pra um PO que recebe muitos retornos: deixa os especialistas terminarem antes. ⚠️ *Starvation:* num projeto sempre cheio o PO pode esperar muito (é o comportamento pedido — fique ciente).
+**Prioridade (PO/coordenador por último):** cada especialista tem uma **prioridade** (default `1000`; quanto **menor**, mais cede a vez). Set via 3º arg do `/bus` (`/bus <slug> <projeto> <prioridade>`) → grava em `<raiz-do-projeto>/.priority` (linhas `slug:N`). O gate faz um especialista **ceder a vez** (`exit 2`) quando ele tem trabalho **e** há handoff pendente pra alguém de prioridade **maior** (igual/menor não bloqueia). Útil pra um PO que recebe muitos retornos: registre-o com `0` → ele só consolida **quando ninguém de prioridade maior tem trabalho**. ⚠️ *Starvation:* num projeto sempre cheio, o low-prio pode esperar bastante (é o comportamento pedido — fique ciente).
 
 ## Modelo de coordenação
 - **Quem origina, coordena.** Acompanhe, cobre os retornos, integre, encerre.

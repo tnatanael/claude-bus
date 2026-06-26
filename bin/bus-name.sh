@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# bus-name.sh [slug] [project]   (par Unix do bus-name.ps1)
+# bus-name.sh [slug] [project] [priority]   (par Unix do bus-name.ps1)
 # Sem args: ecoa o registrado (PROJECT=/SLUG=/BUS_CRON_MINUTE=) ou 'NONE'.
-# Com args: grava (project default='default') e ecoa. Compat: 1 linha antiga = projeto 'default'.
+# Com args: grava (project default='default') e ecoa. [priority] (>=0) faz upsert de
+# "slug:N" no <projroot>/.priority (prioridade do gate; default 1000; menor cede mais).
+# Compat: 1 linha antiga = projeto 'default'.
 # names/ fica na raiz BASE (registro global); o isolamento por projeto e nas pastas de handoff.
 set -u
 bus_root="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
@@ -25,6 +27,18 @@ emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$cronmin"; }
 if [ -n "${1:-}" ]; then
   proj="${2:-default}"; [ -z "$proj" ] && proj="default"
   printf '%s\n%s' "$proj" "$1" > "$f"
+  prio="${3:-}"
+  case "$prio" in
+    ''|*[!0-9]*) : ;;                                  # so se for numero
+    *)
+      if [ "$proj" = "default" ]; then projroot="$bus_root"; else projroot="$bus_root/$proj"; fi
+      mkdir -p "$projroot"; pf="$projroot/.priority"; tmp="$pf.$$.tmp"
+      : > "$tmp"
+      [ -f "$pf" ] && grep -v "^[[:space:]]*$1[[:space:]]*:" "$pf" >> "$tmp" 2>/dev/null
+      printf '%s:%s\n' "$1" "$prio" >> "$tmp"
+      mv -f "$tmp" "$pf"
+    ;;
+  esac
   emit "$proj" "$1"
 elif [ -s "$f" ]; then
   proj="$(sed -n '1p' "$f")"; slug="$(sed -n '2p' "$f")"

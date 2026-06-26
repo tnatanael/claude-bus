@@ -56,15 +56,15 @@ O hook é **fail-open** (erro → deixa o prompt passar) e só age em `/bus`: gr
 
 ### Dica: o PO/coordenador processa por último
 
-Se um projeto tem um **PO/coordenador** (a sessão que fan-out o trabalho e recebe os retornos), vale marcá-lo como **prioridade baixa**: o gate o faz **ceder a vez** — ele só adquire o lock e processa o próprio inbox quando **nenhum outro especialista do projeto** tem handoff pendente. Assim os especialistas terminam primeiro e o PO **consolida no fim**, em vez de competir pelo lock no meio do fluxo.
+Cada especialista tem uma **prioridade** (default `1000`; quanto **menor**, mais cede a vez). Um especialista **cede a vez** (defere) quando tem trabalho **e** há handoff pendente pra alguém de prioridade **maior** — igual/menor não bloqueia. Pra um **PO/coordenador** (a sessão que fan-out o trabalho e recebe os retornos), registre com prioridade **baixa**: assim os especialistas terminam primeiro e o PO **consolida no fim**, em vez de competir pelo lock no meio do fluxo.
 
-Crie `<raiz-do-projeto>/.lowprio` com o(s) slug(s), **um por linha**. Ex. (projeto `acme`, base `/tmp/claude-bus`):
+Set a prioridade pelo **3º argumento do `/bus`**: `/bus <slug> <projeto> <prioridade>`. Ex.: lance o PO com `0`:
 
 ```
-echo po > /tmp/claude-bus/acme/.lowprio
+/bus po acme 0
 ```
 
-(No projeto `default`, a raiz é a própria base: `<base>/.lowprio`.) O gate lê isso pré-LLM — sem reinício, vale no próximo `/bus`. **Atenção a starvation:** num projeto sempre cheio de handoffs, o PO pode esperar bastante (é o comportamento desejado — "só quando ninguém mais tiver"); se incomodar, dá pra adicionar um teto de espera.
+Isso grava `po:0` em `<raiz-do-projeto>/.priority` (linhas `slug:N`; o gate lê pré-LLM, sem reinício). Omitir o 3º arg **não mexe** na prioridade (persiste). **Atenção a starvation:** num projeto sempre cheio de handoffs, um low-prio pode esperar bastante (é o comportamento desejado — "só quando ninguém de prioridade maior tiver"); se incomodar, dá pra adicionar um teto de espera.
 
 ## Dashboard ao vivo (incluso)
 

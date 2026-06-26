@@ -14,6 +14,7 @@
 param(
   [string]$Set = '',
   [string]$Project = '',
+  [int]$Priority = -1,
   [string]$BusRoot = (Join-Path $env:TEMP 'claude-bus')
 )
 
@@ -49,6 +50,17 @@ if ($Set -ne '') {
   $slug = $Set.Trim()
   $enc = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($f, $proj + "`n" + $slug, $enc)
+  # -Priority (>=0): upsert "<slug>:<n>" no <projroot>/.priority -- prioridade do gate
+  # (default 1000; menor cede mais a vez). Omitido = nao mexe (prioridade persiste).
+  if ($Priority -ge 0) {
+    $projRoot = if ($proj -eq 'default') { $BusRoot } else { Join-Path $BusRoot $proj }
+    New-Item -ItemType Directory -Force -Path $projRoot | Out-Null
+    $pf = Join-Path $projRoot '.priority'
+    $lines = @()
+    if (Test-Path -LiteralPath $pf) { $lines = @(Get-Content -LiteralPath $pf | Where-Object { $_.Trim() -ne '' -and (($_ -split ':',2)[0]).Trim() -ne $slug }) }
+    $lines += ($slug + ':' + $Priority)
+    [System.IO.File]::WriteAllText($pf, (($lines -join "`n") + "`n"), $enc)
+  }
   Emit $proj $slug
 } elseif (Test-Path -LiteralPath $f) {
   $raw = (Get-Content -LiteralPath $f -Raw -Encoding UTF8)

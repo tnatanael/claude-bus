@@ -62,34 +62,42 @@ try {
     } catch {}   # lock corrompido/ilegivel -> trata como livre
   }
 
-  # 5. Varre o inbox do projeto: tenho pendente? e ALGUM outro especialista tem?
+  # 5. PRIORIDADES do projeto: arquivo <projroot>/.priority, linhas "slug:N" (default 1000;
+  # quanto MENOR, mais cede a vez). Depois varre o inbox: eu tenho pendente? e algum
+  # especialista de prioridade MAIOR tem pendente?
   $projRoot = $base
   if ($project -and $project -ne 'default') { $projRoot = Join-Path $base $project }
+  $prio = @{}
+  $prioFile = Join-Path $projRoot '.priority'
+  if (Test-Path -LiteralPath $prioFile) {
+    foreach ($ln in @(Get-Content -LiteralPath $prioFile -ErrorAction SilentlyContinue)) {
+      $kv = $ln -split ':', 2
+      if ($kv.Count -eq 2) { $n = 0; if ([int]::TryParse($kv[1].Trim(), [ref]$n)) { $prio[$kv[0].Trim()] = $n } }
+    }
+  }
+  $myPrio = if ($prio.ContainsKey($slug)) { $prio[$slug] } else { 1000 }
+
   $inbox = Join-Path $projRoot 'inbox'
-  $myPending = $false; $othersPending = $false
+  $myPending = $false; $higherPending = $false
   if (Test-Path -LiteralPath $inbox) {
     foreach ($c in (Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like 'to-*' })) {
       $txt = Get-Content -LiteralPath $c.FullName -Raw -ErrorAction SilentlyContinue
       if (-not ($txt -and ($txt -match '###BUS-END'))) { continue }
       $toSlug = if ($c.Name -match '^to-(.+?)__') { $matches[1] } else { '' }
-      if ($toSlug -eq $slug) { $myPending = $true } elseif ($toSlug -ne '') { $othersPending = $true }
+      if ($toSlug -eq $slug) { $myPending = $true }
+      elseif ($toSlug -ne '') {
+        $xPrio = if ($prio.ContainsKey($toSlug)) { $prio[$toSlug] } else { 1000 }
+        if ($xPrio -gt $myPrio) { $higherPending = $true }
+      }
     }
   }
 
-  # 5b. PRIORIDADE BAIXA (PO/coordenador): se EU estou marcado low-prio e algum OUTRO
-  # especialista do projeto tem handoff pendente, CEDO a vez (defiro). So processo o meu
-  # quando ninguem mais tem trabalho -> consolido por ultimo. Marca: <projroot>/.lowprio
-  # (1 slug por linha). So vale quando EU tenho trabalho (myPending) -- senao a logica
-  # normal de re-arme/empty segue valendo.
-  $isLowPrio = $false
-  $lowFile = Join-Path $projRoot '.lowprio'
-  if (Test-Path -LiteralPath $lowFile) {
-    foreach ($ln in @(Get-Content -LiteralPath $lowFile -ErrorAction SilentlyContinue)) {
-      if ($ln.Trim() -eq $slug) { $isLowPrio = $true; break }
-    }
-  }
-  if ($isLowPrio -and $myPending -and $othersPending) {
-    [Console]::Error.WriteLine('BUS: prioridade baixa -- outros especialistas tem handoff; cedendo a vez (processo por ultimo).')
+  # 5b. PRIORIDADE: se EU tenho trabalho e existe handoff p/ alguem de prioridade MAIOR,
+  # CEDO a vez (defiro). Igual ou menor nao bloqueia. So vale quando EU tenho trabalho --
+  # senao a logica normal de re-arme/empty segue valendo. (PO/coordenador: prioridade baixa
+  # -> processa por ultimo.)
+  if ($myPending -and $higherPending) {
+    [Console]::Error.WriteLine('BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.')
     exit 2
   }
 

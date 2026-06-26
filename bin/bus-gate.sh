@@ -52,31 +52,40 @@ main() {
     fi
   fi
 
-  # 4. varre o inbox do projeto: tenho pendente? e ALGUM outro especialista tem?
+  # 4. PRIORIDADES do projeto: arquivo <projroot>/.priority, linhas "slug:N" (default 1000;
+  # quanto MENOR, mais cede a vez).
   projroot="$base"
   if [ -n "$project" ] && [ "$project" != "default" ]; then projroot="$base/$project"; fi
+  priofile="$projroot/.priority"
+  getprio() {   # $1 = slug -> imprime a prioridade (default 1000)
+    if [ -f "$priofile" ]; then
+      v="$(sed -n "s/^[[:space:]]*$1[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$priofile" | head -n1)"
+      [ -n "$v" ] && { echo "$v"; return; }
+    fi
+    echo 1000
+  }
+  myprio="$(getprio "$slug")"
+
+  # varre o inbox: eu tenho pendente? e algum especialista de prioridade MAIOR tem?
   inbox="$projroot/inbox"
-  mypending=0; otherspending=0
+  mypending=0; higherpending=0
   if [ -d "$inbox" ]; then
     for f in "$inbox"/to-*.handoff; do
       [ -e "$f" ] || continue
       grep -q '###BUS-END' "$f" 2>/dev/null || continue
       bn="$(basename "$f")"; toslug="${bn#to-}"; toslug="${toslug%%__*}"   # entre 'to-' e o 1o '__'
-      if [ "$toslug" = "$slug" ]; then mypending=1; else otherspending=1; fi
+      if [ "$toslug" = "$slug" ]; then mypending=1
+      elif [ -n "$toslug" ]; then
+        xp="$(getprio "$toslug")"
+        [ "$xp" -gt "$myprio" ] 2>/dev/null && higherpending=1
+      fi
     done
   fi
 
-  # 4b. PRIORIDADE BAIXA (PO/coordenador): se EU estou marcado e algum OUTRO tem handoff,
-  # cedo a vez (defiro) -- so processo o meu quando ninguem mais tem trabalho. Marca:
-  # arquivo <projroot>/.lowprio (1 slug por linha). So vale quando EU tenho trabalho.
-  islowprio=0
-  if [ -f "$projroot/.lowprio" ]; then
-    while IFS= read -r ln; do
-      [ "$(printf '%s' "$ln" | tr -d ' \r\n')" = "$slug" ] && islowprio=1
-    done < "$projroot/.lowprio"
-  fi
-  if [ "$islowprio" = "1" ] && [ "$mypending" = "1" ] && [ "$otherspending" = "1" ]; then
-    echo 'BUS: prioridade baixa -- outros tem handoff; cedendo a vez (processo por ultimo).' >&2
+  # 4b. PRIORIDADE: cedo a vez (defiro) se EU tenho trabalho e existe handoff p/ alguem de
+  # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
+  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
+    echo 'BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.' >&2
     exit 2
   fi
 
