@@ -19,9 +19,14 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = Number(process.env.PORT) || 7878;
-// Default cross-platform: <temp do SO>/claude-bus (Windows: %TEMP%, Unix: /tmp) —
-// casa com os scripts (.ps1 usam %TEMP%, .sh usam /tmp). Override via CLAUDE_BUS_ROOT.
-const BUS_ROOT = process.env.CLAUDE_BUS_ROOT || path.join(require('os').tmpdir(), 'claude-bus');
+// Default must match the scripts on every OS: .ps1 use %TEMP%, .sh hardcode
+// /tmp/claude-bus. On macOS os.tmpdir() is $TMPDIR (/var/folders/.../T), NOT /tmp,
+// so deriving from os.tmpdir() on Unix would read a different dir than the scripts
+// write to. Use %TEMP% on Windows, /tmp/claude-bus on Unix. Override via CLAUDE_BUS_ROOT.
+const BUS_ROOT = process.env.CLAUDE_BUS_ROOT
+  || (process.platform === 'win32'
+      ? path.join(require('os').tmpdir(), 'claude-bus')
+      : '/tmp/claude-bus');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];
