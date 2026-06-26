@@ -872,10 +872,8 @@ function render(state) {
   if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
   const ss = document.getElementById("singleSpecs");
   if (ss) ss.innerHTML = '<span class="next-check"></span> <span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
-  updateEtas();
   const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
-  // inclui a ORDEM por proximo-tique na assinatura: re-renderiza (e re-ordena) quando a
-  // ordem muda com o tempo (tique passou), nao so quando entra/sai handoff.
+  // a ORDEM (prioridade + espera) entra na assinatura -> re-ordena se a prioridade mudar.
   const inboxOrder = sortInboxByWait(h.inbox || []).map(it => it.id).join(",");
   const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
@@ -883,6 +881,8 @@ function render(state) {
     lastHandoffSig = sig;
     renderHandoffs(h, state.project);
   }
+  updateEtas();   // DEPOIS do (re)render: preenche o eta dos cards recem-criados no MESMO
+                  // ciclo (o browser so repinta com os tempos prontos -> sem piscar "zerado").
   renderHolder(state.holder);
 }
 
