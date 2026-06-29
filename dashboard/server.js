@@ -241,6 +241,14 @@ function readRoster() {
   }
   for (const p of Object.keys(roster)) {
     const prio = readPriorities(p === 'default' ? BUS_ROOT : path.join(BUS_ROOT, p));   // 1x por projeto
+    // dedupe por SLUG: varias sessoes (sids) com o mesmo slug -> 1 chip; armado = QUALQUER sid fresco
+    // (evita chip duplicado de sid morto re-registrado + corrige o armedMap do "destino offline").
+    const bySlug = {};
+    for (const s of roster[p]) {
+      if (!bySlug[s.slug]) bySlug[s.slug] = s;
+      else if (s.armed) bySlug[s.slug].armed = true;
+    }
+    roster[p] = Object.values(bySlug);
     for (const s of roster[p]) s.prio = (s.slug in prio) ? prio[s.slug] : 1000;
     roster[p].sort((a, b) => a.slug.localeCompare(b.slug));
   }
