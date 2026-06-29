@@ -68,6 +68,11 @@ main() {
   fi
   echo "$now" > "$seenfile"
 
+  # 3b. CHAMADA MANUAL (/bus <args>) = CONFIG, NAO processa. Passa direto (exit 0): o modelo
+  # so registra/seta prioridade/re-arma e PARA (sem ler o inbox). Nao usa o lock (config nao
+  # serializa). A prioridade do 3o arg ja foi gravada no 2a. SO o BARE /bus processa o inbox.
+  [ "$ismanual" = "1" ] && exit 0
+
   # 3. lock GLOBAL: tomado por outro e fresco -> defer
   lock="$base/.bus-lock"
   if [ -f "$lock" ]; then
@@ -111,12 +116,12 @@ main() {
 
   # 4b. PRIORIDADE: cedo a vez (defiro) se EU tenho trabalho e existe handoff p/ alguem de
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
-  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ] && [ "$ismanual" != "1" ]; then   # manual nao cede
+  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
     echo 'BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.' >&2
     exit 2
   fi
 
-  if [ "$mypending" = "1" ] || [ "$ismanual" = "1" ]; then   # tem trabalho OU e manual -> tenta rodar (serializado)
+  if [ "$mypending" = "1" ]; then   # bare /bus com trabalho -> processa (serializado pelo lock)
     exp=$(( now + LEASE_MIN * 60 ))
     iso_now="$(date -d "@$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$now")"
     iso_exp="$(date -d "@$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$exp")"
@@ -138,7 +143,7 @@ main() {
     exit 2
   fi
 
-  # 5. inbox vazia -- so chega aqui no CRON bare (manual ja foi pelo acquire acima)
+  # 5. inbox vazia -- so chega aqui o BARE /bus sem trabalho (manual/config ja saiu no 3b)
   if [ "$seen_age_min" -gt "$SEEN_STALE_MIN" ]; then exit 0; fi
   echo 'BUS: nada pendente -- pulando (cron segue armado, custo zero).' >&2
   exit 2

@@ -2,14 +2,14 @@
 
 Plugin do **Claude Code** para **comunicação assíncrona entre sessões** ("especialistas"). Cada sessão vira um especialista; eles trocam **handoffs** por um BUS de arquivos.
 
-**Como funciona.** Você registra uma sessão como especialista (`/bus <slug> [projeto]`) e ela processa os handoffs endereçados a ela. Isso dispara de dois jeitos: você rodando `/bus` **manualmente**, ou o **auto-recheck** — um cron de sessão (a cada 1 min) que o próprio `/bus` arma e que re-checa o inbox sozinho **enquanto a sessão está aberta**. Quem envia um handoff termina o turno com uma **linha de despacho** (`📨 Handoffs para: x, y, z`) apontando onde há trabalho.
+**Como funciona.** Há **dois usos do `/bus`**: **com argumentos** (`/bus <slug> [projeto] [prioridade]`) ele **configura** a sessão — registra a identidade no projeto, define prioridade e arma o auto-recheck — e **não processa**; **bare** (`/bus`) ele **processa** os handoffs endereçados a ela. O processamento dispara de dois jeitos: você rodando `/bus` (bare), ou o **auto-recheck** — um cron de sessão (a cada 1 min) que re-checa o inbox sozinho **enquanto a sessão está aberta**. Quem envia um handoff termina o turno com uma **linha de despacho** (`📨 Handoffs para: x, y, z`) apontando onde rodar `/bus`.
 
 Não existe **daemon nem processo de fundo separado**: o auto-recheck é a própria sessão se reacordando pelo agendador do harness (in-harness) — some limpo quando a sessão fecha, sem processo órfão pra vazar. Pra que essa recheca de minuto em minuto **não acorde o modelo à toa**, ative o **gate de concorrência** (opcional, [abaixo](#gate-de-concorrência-opcional)): ele **defere os ticks vazios ou bloqueados antes da API** — custo de token zero quando não há trabalho — e ainda serializa o trabalho entre todas as sessões.
 
 - **Escopo de projeto** — `/bus <slug> [projeto]` isola cada frente; você só vê e endereça especialistas do mesmo projeto (omitido = `default`).
-- **Processamento on-demand** — `/bus` lê o inbox, valida o token, executa os handoffs e arquiva.
+- **Config vs processar** — `/bus <slug> [projeto] [prio]` (com args) **só configura** (identidade/prioridade/cron); **`/bus` bare** lê o inbox, valida o token, executa os handoffs e arquiva.
 - **Autenticação por token** — handoffs forjados vão pra quarentena (`rejected/`) antes de qualquer execução.
-- **Auto-nome por sessão** — define o slug 1× por sessão; religações são só `/bus`.
+- **Auto-nome por sessão** — configure o slug 1× com `/bus <slug> [projeto]`; depois é só `/bus` (bare) pra processar.
 - **Linha de despacho** — cada envio diz ao operador onde disparar o próximo `/bus`.
 - **Operação desassistida automática** — o `/bus` arma sozinho um recheck **a cada 1 min** (cron de sessão) pra processar handoffs quando você sai.
 - **Gate de concorrência (anti-overload, opcional)** — um hook serializa o trabalho disparado por `/bus` num **lock global** (1 por máquina): como o limite de requisições é da **conta** Claude (não do projeto), só um especialista trabalha por vez; os demais deferem **sem gastar API**, e checagens de inbox vazia ficam de graça. Setup na seção [Gate de concorrência](#gate-de-concorrência-opcional).
@@ -23,7 +23,7 @@ Não existe **daemon nem processo de fundo separado**: o auto-recheck é a próp
 
 ## Uso
 
-Em cada sessão que vai participar, rode **uma vez**: `/bus <slug> [projeto]` (ex.: `/bus backend acme`). O projeto isola o BUS — especialistas só veem/endereçam quem está no mesmo projeto (omitido = `default`). Depois, religar/rechecar é só `/bus` (ele lembra slug e projeto pela sessão).
+Em cada sessão que vai participar, rode **uma vez** `/bus <slug> [projeto]` (ex.: `/bus backend acme`) pra **configurar** — registra no projeto e arma o auto-recheck (**não processa**). A partir daí, **`/bus` (bare)** — ou o auto-cron — **processa** os handoffs (lembra slug/projeto pela sessão). O projeto isola o BUS: especialistas só veem/endereçam quem está no mesmo projeto (omitido = `default`). Pra mudar a **prioridade** depois: `/bus <slug> <projeto> <prioridade>` (configura, não processa).
 
 Para mandar trabalho de uma sessão a outra, o especialista escreve um handoff endereçado ao slug do destino e termina o turno com a **linha de despacho**. Você então roda `/bus` no destino pra ele processar. O próprio `/bus` arma um recheck **a cada 1 min** (cron de sessão) que processa handoffs enquanto você está ausente.
 
@@ -40,7 +40,7 @@ Sem dependências: usa o PowerShell do Windows e o bash do macOS/Linux.
 
 - **BUS** = pasta compartilhada entre as sessões: base `%TEMP%\claude-bus` (Windows) ou `/tmp/claude-bus` (Unix), override pela env `CLAUDE_BUS_ROOT`. O projeto `default` usa a base; um projeto `<p>` usa `<base>/<p>/` (cada um com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O registro `names/` fica na base (global).
 - Cada handoff é um arquivo `to-<destino>__from-<origem>__<id>.handoff`, escrito atomicamente e com um token de auth.
-- `/bus` chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido).
+- **`/bus` (bare)** chama o leitor `bus-inbox` (one-shot): valida o token de cada handoff endereçado a você, manda os forjados pra `rejected/` e entrega os autênticos pra sessão processar (claim em `processing/`, executa, arquiva em `done/`, devolve retorno se pedido). (Comando **com args** = config; não chega a processar.)
 - Não há **daemon separado**, presença nem heartbeat: o que reacorda uma sessão é você rodando `/bus` **ou** o cron de auto-recheck dela (a cada 1 min, só enquanto a sessão está aberta). O cron é in-harness — re-invoca a própria sessão e some quando o app fecha; nada de processo órfão.
 - **Gate de concorrência (opcional)** — um hook `UserPromptSubmit` (`bin/bus-gate.*`) filtra os `/bus` **antes da API**: defere sem custo se outro especialista segura o **lock global** (`<base>/.bus-lock`) ou se sua inbox está vazia; adquire o lock quando há trabalho pra você. O fim do `/bus` libera o lock (`bin/bus-lock.* --release`); um lease de 30 min é a rede de segurança. Setup abaixo.
 

@@ -82,6 +82,12 @@ try {
   }
   [System.IO.File]::WriteAllText($seenFile, (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))
 
+  # 3b. CHAMADA MANUAL (/bus <args>) = CONFIG, NAO processa. Passa direto (exit 0): o modelo
+  # so registra identidade/seta prioridade/re-arma o cron e PARA (sem ler o inbox). Nao usa o
+  # lock (config nao processa, nao precisa serializar). A prioridade do 3o arg ja foi gravada
+  # no passo 2a (rede). SO o BARE /bus (cron ou manual) processa o inbox.
+  if ($isManual) { exit 0 }
+
   # 4. Lock GLOBAL (1 por maquina). Tomado por outro e fresco -> defer.
   $lockFile = Join-Path $base '.bus-lock'
   $now = [datetimeoffset]::Now
@@ -130,12 +136,12 @@ try {
   # CEDO a vez (defiro). Igual ou menor nao bloqueia. So vale quando EU tenho trabalho --
   # senao a logica normal de re-arme/empty segue valendo. (PO/coordenador: prioridade baixa
   # -> processa por ultimo.)
-  if ($myPending -and $higherPending -and -not $isManual) {   # manual nao cede (intencao explicita do operador)
+  if ($myPending -and $higherPending) {
     [Console]::Error.WriteLine('BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.')
     exit 2
   }
 
-  if ($myPending -or $isManual) {   # tem trabalho OU e chamada manual -> tenta rodar (serializado pelo lock)
+  if ($myPending) {   # bare /bus com trabalho -> processa (serializado pelo lock)
     # acquire: cria exclusivo; se ja existe e e MEU ou EXPIRADO, sobrescreve (steal).
     $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
     $enc = New-Object System.Text.UTF8Encoding($false)
@@ -158,7 +164,7 @@ try {
     exit 2
   }
 
-  # 6. Inbox vazia -- so chega aqui no CRON bare (manual ja foi pelo acquire no passo 5).
+  # 6. Inbox vazia -- so chega aqui o BARE /bus sem trabalho (manual/config ja saiu no passo 3b).
   if ($seenAgeMin -gt $SEEN_STALE_MIN) { exit 0 }   # gap > 3h -> deixa re-armar o cron
   [Console]::Error.WriteLine('BUS: nada pendente -- pulando (cron segue armado, custo zero).')
   exit 2
