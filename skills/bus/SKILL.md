@@ -29,7 +29,7 @@ Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude C
 Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (ambos nativos).
 
 ## 1. Quem você é (projeto + slug)
-1. **Veio slug** (1º arg após `/bus`) → grave (2º arg = projeto, omitido = `default`; 3º arg opcional = **prioridade** 0–1000, default 1000, menor cede mais) via *nome — gravar*.
+1. **Veio slug** (1º arg após `/bus`) → grave (2º arg = projeto, omitido = `default`; 3º arg opcional = **prioridade** 0–1000, default 1000, menor cede mais) via *nome — gravar*. **Registrar REIVINDICA o slug:** o `bus-name` apaga automaticamente registro de **sid antigo** do mesmo slug+projeto (+ seen) — sessão re-registrada não vira ghost.
 2. **Veio vazio** → *nome — ler*: retornou `PROJECT=/SLUG=/BUS_CRON_MINUTE=` → use direto (religação); `NONE` → **pergunte** o slug (e projeto) e grave.
 Guarde **SLUG**, **PROJECT** e **BUS_CRON_MINUTE**. Passe o `PROJECT` aos comandos via `-Project`/`--project` (nada de caminho manual).
 

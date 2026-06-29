@@ -241,14 +241,8 @@ function readRoster() {
   }
   for (const p of Object.keys(roster)) {
     const prio = readPriorities(p === 'default' ? BUS_ROOT : path.join(BUS_ROOT, p));   // 1x por projeto
-    // dedupe por SLUG: varias sessoes (sids) com o mesmo slug -> 1 chip; armado = QUALQUER sid fresco
-    // (evita chip duplicado de sid morto re-registrado + corrige o armedMap do "destino offline").
-    const bySlug = {};
-    for (const s of roster[p]) {
-      if (!bySlug[s.slug]) bySlug[s.slug] = s;
-      else if (s.armed) bySlug[s.slug].armed = true;
-    }
-    roster[p] = Object.values(bySlug);
+    // NAO deduplica: ghosts (sid morto re-registrado) DEVEM aparecer no front como chip
+    // offline -- e sintoma de resíduo no BUS. A raiz é resolvida na evicção do bus-name -Set.
     for (const s of roster[p]) s.prio = (s.slug in prio) ? prio[s.slug] : 1000;
     roster[p].sort((a, b) => a.slug.localeCompare(b.slug));
   }
@@ -298,7 +292,7 @@ function readPriorities(root) {
 // destino (default 1000; o front mostra badge quando != 1000).
 function attachToCron(handoffs, specs, projRoot) {
   const armedMap = {};
-  for (const s of (specs || [])) if (!(s.slug in armedMap)) armedMap[s.slug] = !!s.armed;
+  for (const s of (specs || [])) armedMap[s.slug] = !!armedMap[s.slug] || !!s.armed;   // armado = QUALQUER sid do slug fresco (robusto a ghost+vivo coexistindo)
   const prio = readPriorities(projRoot);
   // toPrio (prioridade do destino) em TODOS os status -> o badge aparece certo em qualquer
   // card, nao so no inbox (antes, processing/done caiam no default 1000 no front).

@@ -50,6 +50,19 @@ if ($Set -ne '') {
   $slug = $Set.Trim()
   $enc = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($f, $proj + "`n" + $slug, $enc)
+  # EVICCAO DE GHOST: este (projeto, slug) agora e DESTA sessao. Apaga qualquer names/<outroSid>
+  # com o MESMO (projeto, slug) + o seen dele -- sessao morta re-registrada NAO vira ghost no BUS.
+  foreach ($nf in (Get-ChildItem -LiteralPath $dir -Filter '*.txt' -File -ErrorAction SilentlyContinue)) {
+    if ($nf.BaseName -eq $sid) { continue }
+    $nl = @((Get-Content -LiteralPath $nf.FullName -Raw -Encoding UTF8) -split "`r?`n")
+    $np = 'default'; $ns = ''
+    if ($nl.Count -ge 2 -and $nl[1].Trim() -ne '') { $np = $nl[0].Trim(); $ns = $nl[1].Trim() }
+    elseif ($nl[0].Trim() -ne '') { $ns = $nl[0].Trim() }   # compat: 1 linha = slug, projeto default
+    if ($np -eq $proj -and $ns -eq $slug) {
+      Remove-Item -LiteralPath $nf.FullName -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath (Join-Path $seenDir $nf.BaseName) -Force -ErrorAction SilentlyContinue
+    }
+  }
   # -Priority (>=0): upsert "<slug>:<n>" no <projroot>/.priority -- prioridade do gate
   # (default 1000; menor cede mais a vez). Omitido = nao mexe (prioridade persiste).
   if ($Priority -ge 0) {

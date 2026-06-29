@@ -27,6 +27,15 @@ emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$cronmin"; }
 if [ -n "${1:-}" ]; then
   proj="${2:-default}"; [ -z "$proj" ] && proj="default"
   printf '%s\n%s' "$proj" "$1" > "$f"
+  # EVICCAO DE GHOST: este (projeto, slug) agora e DESTA sessao. Apaga names/<outroSid> com o
+  # MESMO (projeto, slug) + o seen dele -- sessao morta re-registrada NAO vira ghost no BUS.
+  for nf in "$dir"/*.txt; do
+    [ -e "$nf" ] || continue
+    bn="$(basename "$nf" .txt)"; [ "$bn" = "$sid" ] && continue
+    np="$(sed -n '1p' "$nf")"; ns="$(sed -n '2p' "$nf")"
+    [ -z "$ns" ] && { ns="$np"; np="default"; }   # compat: 1 linha = slug, projeto default
+    if [ "$np" = "$proj" ] && [ "$ns" = "$1" ]; then rm -f "$nf" "$seen_dir/$bn"; fi
+  done
   prio="${3:-}"
   case "$prio" in
     ''|*[!0-9]*) : ;;                                  # so se for numero
