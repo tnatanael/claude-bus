@@ -77,7 +77,7 @@ node dashboard/server.js           # http://localhost:7878 (porta via env PORT)
 node --watch dashboard/server.js   # idem, com auto-reload ao salvar o server.js (Node 20+)
 ```
 
-Detalhes e contrato da API em [`dashboard/README.md`](dashboard/README.md) e [`dashboard/ARCHITECTURE.md`](dashboard/ARCHITECTURE.md).
+Reiniciar/verificar (com auto-reload via `--watch`) e persistência no boot — Windows/macOS/Linux — em [`dashboard/OPERATIONS.md`](dashboard/OPERATIONS.md). Detalhes e contrato da API em [`dashboard/README.md`](dashboard/README.md) e [`dashboard/ARCHITECTURE.md`](dashboard/ARCHITECTURE.md).
 
 ## Segurança
 
