@@ -292,10 +292,15 @@ function attachToCron(handoffs, specs, projRoot) {
   const armedMap = {};
   for (const s of (specs || [])) if (!(s.slug in armedMap)) armedMap[s.slug] = !!s.armed;
   const prio = readPriorities(projRoot);
+  // toPrio (prioridade do destino) em TODOS os status -> o badge aparece certo em qualquer
+  // card, nao so no inbox (antes, processing/done caiam no default 1000 no front).
+  for (const status of ['inbox', 'processing', 'done', 'rejected']) {
+    for (const it of (handoffs[status] || [])) it.toPrio = (it.to in prio) ? prio[it.to] : 1000;
+  }
+  // tick + toArmed (eta "na fila"/"offline") so faz sentido no INBOX (itens aguardando).
   for (const it of (handoffs.inbox || [])) {
     it.tick = true;
     it.toArmed = (it.to in armedMap) ? armedMap[it.to] : null;   // null = destino nao registrado
-    it.toPrio = (it.to in prio) ? prio[it.to] : 1000;
   }
 }
 
