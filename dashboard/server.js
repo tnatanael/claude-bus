@@ -239,7 +239,11 @@ function readRoster() {
     } catch (_) {}
     (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid), armed });
   }
-  for (const p of Object.keys(roster)) roster[p].sort((a, b) => a.slug.localeCompare(b.slug));
+  for (const p of Object.keys(roster)) {
+    const prio = readPriorities(p === 'default' ? BUS_ROOT : path.join(BUS_ROOT, p));   // 1x por projeto
+    for (const s of roster[p]) s.prio = (s.slug in prio) ? prio[s.slug] : 1000;
+    roster[p].sort((a, b) => a.slug.localeCompare(b.slug));
+  }
   return roster;
 }
 

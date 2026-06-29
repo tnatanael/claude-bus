@@ -331,6 +331,9 @@
   .specs { margin: 4px 0 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .specs-label { font-size: 11px; color: var(--muted); }
   .spec-chip { font-family: var(--mono); font-size: 11px; color: var(--text); background: rgba(88,166,255,0.12); border: 1px solid rgba(88,166,255,0.35); border-radius: 10px; padding: 2px 8px; }
+  .spec-chip .cprio { font-family: var(--mono); font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 5px; margin-left: 4px; }
+  .spec-chip .cprio.low { color: #6ea8fe; background: rgba(110,168,254,.16); border: 1px solid rgba(110,168,254,.4); }
+  .spec-chip .cprio.high { color: var(--amber); background: rgba(210,153,34,.18); border: 1px solid rgba(210,153,34,.45); }
   .specs-empty { font-size: 11px; color: var(--muted); font-style: italic; }
   .eta { font-family: var(--mono); font-size: 10px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.35); border-radius: 6px; padding: 1px 6px; }
   .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
@@ -584,7 +587,12 @@ function specsHtml(specs) {
     const tip = armed
       ? "cron de auto-recheck armado e ativo (rodou /bus na última ~1h)"
       : "OFFLINE: cron não confirmado na última ~1h — a sessão pode estar fechada ou o cron parado; rode /bus nela";
-    return `<span class="spec-chip" data-slug="${esc(slug)}" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}</span>`;
+    // prioridade no chip SÓ se ≠ default (1000) — evita poluir; default fica implícito
+    const pr = (s && typeof s === "object" && typeof s.prio === "number") ? s.prio : 1000;
+    const prioBadge = pr !== 1000
+      ? `<span class="cprio ${pr < 1000 ? "low" : "high"}" title="prioridade ${pr} (default 1000 — menor cede a vez, maior fura a fila)">${pr < 1000 ? "↓" : "↑"}${pr}</span>`
+      : "";
+    return `<span class="spec-chip" data-slug="${esc(slug)}" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}${prioBadge}</span>`;
   }).join("");
 }
 
