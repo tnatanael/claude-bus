@@ -80,6 +80,7 @@ main() {
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
     if [ -n "$lexp" ] && [ "$now" -lt "$lexp" ] && [ "$lsid" != "$sid" ]; then
       echo 'BUS: outro especialista esta trabalhando (lock global) -- deferido.' >&2
+      buslog "$base" "$sid" "$slug" "defer-lock>$lsid"
       exit 2
     fi
   fi
@@ -100,7 +101,7 @@ main() {
 
   # varre o inbox: eu tenho pendente? e algum especialista de prioridade MAIOR tem?
   inbox="$projroot/inbox"
-  mypending=0; higherpending=0
+  mypending=0; higherpending=0; higherslug=""
   if [ -d "$inbox" ]; then
     for f in "$inbox"/to-*.handoff; do
       [ -e "$f" ] || continue
@@ -109,7 +110,7 @@ main() {
       if [ "$toslug" = "$slug" ]; then mypending=1
       elif [ -n "$toslug" ]; then
         xp="$(getprio "$toslug")"
-        [ "$xp" -gt "$myprio" ] 2>/dev/null && higherpending=1
+        [ "$xp" -gt "$myprio" ] 2>/dev/null && { higherpending=1; [ -z "$higherslug" ] && higherslug="$toslug"; }
       fi
     done
   fi
@@ -118,6 +119,7 @@ main() {
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
   if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
     echo 'BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.' >&2
+    buslog "$base" "$sid" "$slug" "defer-prio>$higherslug"
     exit 2
   fi
 

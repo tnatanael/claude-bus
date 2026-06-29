@@ -97,6 +97,7 @@ try {
       $exp = [datetimeoffset]::Parse($L.expiry)
       if ($now -lt $exp -and $L.sid -ne $sid) {
         [Console]::Error.WriteLine('BUS: outro especialista esta trabalhando (lock global) -- deferido p/ o proximo ciclo.')
+        BusLog $base $sid $slug ("defer-lock>" + ([string]$L.slug))
         exit 2
       }
     } catch {}   # lock corrompido/ilegivel -> trata como livre
@@ -118,7 +119,7 @@ try {
   $myPrio = if ($prio.ContainsKey($slug)) { $prio[$slug] } else { 1000 }
 
   $inbox = Join-Path $projRoot 'inbox'
-  $myPending = $false; $higherPending = $false
+  $myPending = $false; $higherPending = $false; $higherSlug = ''
   if (Test-Path -LiteralPath $inbox) {
     foreach ($c in (Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like 'to-*' })) {
       $txt = Get-Content -LiteralPath $c.FullName -Raw -ErrorAction SilentlyContinue
@@ -127,7 +128,7 @@ try {
       if ($toSlug -eq $slug) { $myPending = $true }
       elseif ($toSlug -ne '') {
         $xPrio = if ($prio.ContainsKey($toSlug)) { $prio[$toSlug] } else { 1000 }
-        if ($xPrio -gt $myPrio) { $higherPending = $true }
+        if ($xPrio -gt $myPrio) { $higherPending = $true; if (-not $higherSlug) { $higherSlug = $toSlug } }
       }
     }
   }
@@ -138,6 +139,7 @@ try {
   # -> processa por ultimo.)
   if ($myPending -and $higherPending) {
     [Console]::Error.WriteLine('BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.')
+    BusLog $base $sid $slug ("defer-prio>" + $higherSlug)
     exit 2
   }
 
