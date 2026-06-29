@@ -73,7 +73,8 @@ Isso grava `po:0` em `<raiz-do-projeto>/.priority` (linhas `slug:N`; o gate lê 
 A pasta [`dashboard/`](dashboard/) traz um app web minúsculo (sem build, sem dependências, só a stdlib do Node) que visualiza o BUS em tempo real, com **seletor de projeto** (um projeto isolado, ou "Todos" agrupado): handoffs transitando por `inbox -> processing -> done`, correlação de respostas por `in_reply_to`, os rejeitados por auth, e **quem segura o lock global agora** ("Trabalhando agora", com a expiração do lease). É **estritamente somente leitura** sobre o BUS.
 
 ```
-node dashboard/server.js   # http://localhost:7878 (porta via env PORT)
+node dashboard/server.js           # http://localhost:7878 (porta via env PORT)
+node --watch dashboard/server.js   # idem, com auto-reload ao salvar o server.js (Node 20+)
 ```
 
 Detalhes e contrato da API em [`dashboard/README.md`](dashboard/README.md) e [`dashboard/ARCHITECTURE.md`](dashboard/ARCHITECTURE.md).
