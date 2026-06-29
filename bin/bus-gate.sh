@@ -33,6 +33,23 @@ main() {
   [ -n "$sid" ] || exit 0
 
   base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
+
+  # 2a. CRON vs MANUAL: o cron dispara bare "/bus" (sem args). Qualquer "/bus <args>" e
+  # chamada MANUAL -> deve RODAR (acquire+run, serializado pelo lock), nao deferir em inbox
+  # vazio. Se traz prioridade (3o arg), grava .priority PRE-API (manual c/ prioridade SEMPRE seta).
+  ismanual=0
+  set -- $prompt
+  [ "$1" = "/bus" ] && [ -n "$2" ] && ismanual=1
+  if [ "$1" = "/bus" ] && [ -n "$2" ] && [ -n "$3" ] && [ -n "$4" ] && [ -z "$5" ] && printf '%s' "$4" | grep -qE '^[0-9]+$'; then
+    pslug="$2"; pproj="$3"; pprio="$4"
+    if [ "$pproj" = "default" ]; then proot="$base"; else proot="$base/$pproj"; fi
+    mkdir -p "$proot"; pf="$proot/.priority"; tmp="$pf.$$.tmp"
+    : > "$tmp"
+    [ -f "$pf" ] && grep -v "^[[:space:]]*$pslug[[:space:]]*:" "$pf" >> "$tmp" 2>/dev/null
+    printf '%s:%s\n' "$pslug" "$pprio" >> "$tmp"
+    mv -f "$tmp" "$pf"
+  fi
+
   namefile="$base/names/$sid.txt"
   [ -f "$namefile" ] || exit 0
   project="$(sed -n '1p' "$namefile" | tr -d ' \r\n')"
@@ -94,12 +111,12 @@ main() {
 
   # 4b. PRIORIDADE: cedo a vez (defiro) se EU tenho trabalho e existe handoff p/ alguem de
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
-  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
+  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ] && [ "$ismanual" != "1" ]; then   # manual nao cede
     echo 'BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.' >&2
     exit 2
   fi
 
-  if [ "$mypending" = "1" ]; then
+  if [ "$mypending" = "1" ] || [ "$ismanual" = "1" ]; then   # tem trabalho OU e manual -> tenta rodar (serializado)
     exp=$(( now + LEASE_MIN * 60 ))
     iso_now="$(date -d "@$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$now")"
     iso_exp="$(date -d "@$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$exp")"
@@ -121,7 +138,7 @@ main() {
     exit 2
   fi
 
-  # 5. inbox vazia
+  # 5. inbox vazia -- so chega aqui no CRON bare (manual ja foi pelo acquire acima)
   if [ "$seen_age_min" -gt "$SEEN_STALE_MIN" ]; then exit 0; fi
   echo 'BUS: nada pendente -- pulando (cron segue armado, custo zero).' >&2
   exit 2

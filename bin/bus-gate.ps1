@@ -43,6 +43,27 @@ try {
   $base = $env:CLAUDE_BUS_ROOT
   if (-not $base) { $base = Join-Path $env:TEMP 'claude-bus' }
 
+  # 2a. CRON vs MANUAL: o cron dispara bare "/bus" (sem args). Qualquer "/bus <args>" e
+  # chamada MANUAL do operador -> deve RODAR (acquire+run, serializado pelo lock), nao
+  # deferir em inbox vazio. Distincao limpa entre auto-recheck e intencao explicita.
+  $isManual = ($prompt -match '(?im)^\s*/bus\s+\S')
+  # Se traz prioridade (3o arg: /bus <slug> <projeto> <N>), grava em <projeto>/.priority
+  # PRE-API -- assim um /bus manual com prioridade SEMPRE seta, mesmo que o gate defira
+  # por lock depois. (O cron e bare, nunca manda prioridade.)
+  $pm = [regex]::Match($prompt, '(?im)^\s*/bus\s+(\S+)\s+(\S+)\s+(\d+)\s*$')
+  if ($pm.Success) {
+    $pSlug = $pm.Groups[1].Value; $pProj = $pm.Groups[2].Value; $pPrio = $pm.Groups[3].Value
+    try {
+      $pRoot = if ($pProj -and $pProj -ne 'default') { Join-Path $base $pProj } else { $base }
+      New-Item -ItemType Directory -Force -Path $pRoot | Out-Null
+      $pf = Join-Path $pRoot '.priority'
+      $keep = @()
+      if (Test-Path -LiteralPath $pf) { $keep = @(Get-Content -LiteralPath $pf -EA SilentlyContinue | Where-Object { $_.Trim() -ne '' -and (($_ -split ':',2)[0]).Trim() -ne $pSlug }) }
+      $keep += "${pSlug}:${pPrio}"
+      [System.IO.File]::WriteAllText($pf, ($keep -join "`r`n") + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    } catch {}
+  }
+
   # 2. Identidade do registro global names/<sid> (linha1=projeto, linha2=slug).
   $nameFile = Join-Path (Join-Path $base 'names') ($sid + '.txt')
   if (-not (Test-Path -LiteralPath $nameFile)) { exit 0 }   # nao registrado -> deixa registrar
@@ -109,12 +130,12 @@ try {
   # CEDO a vez (defiro). Igual ou menor nao bloqueia. So vale quando EU tenho trabalho --
   # senao a logica normal de re-arme/empty segue valendo. (PO/coordenador: prioridade baixa
   # -> processa por ultimo.)
-  if ($myPending -and $higherPending) {
+  if ($myPending -and $higherPending -and -not $isManual) {   # manual nao cede (intencao explicita do operador)
     [Console]::Error.WriteLine('BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.')
     exit 2
   }
 
-  if ($myPending) {
+  if ($myPending -or $isManual) {   # tem trabalho OU e chamada manual -> tenta rodar (serializado pelo lock)
     # acquire: cria exclusivo; se ja existe e e MEU ou EXPIRADO, sobrescreve (steal).
     $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
     $enc = New-Object System.Text.UTF8Encoding($false)
@@ -137,7 +158,7 @@ try {
     exit 2
   }
 
-  # 6. Inbox vazia.
+  # 6. Inbox vazia -- so chega aqui no CRON bare (manual ja foi pelo acquire no passo 5).
   if ($seenAgeMin -gt $SEEN_STALE_MIN) { exit 0 }   # gap > 3h -> deixa re-armar o cron
   [Console]::Error.WriteLine('BUS: nada pendente -- pulando (cron segue armado, custo zero).')
   exit 2
