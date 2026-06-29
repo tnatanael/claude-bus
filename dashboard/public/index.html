@@ -452,7 +452,22 @@
 
 const POLL_MS = 1500;
 const API = "/api/state";
-let selectedProject = (function () { try { return localStorage.getItem("busProject") || "all"; } catch (_) { return "all"; } })();
+let selectedProject = (function () {
+  try {
+    const u = new URLSearchParams(location.search).get("project");
+    if (u) return u;                                       // ?project=... = fonte da verdade: independente POR ABA, sobrevive ao F5, link compartilhável
+    return localStorage.getItem("busProject") || "all";   // fallback: último usado (aba nova / entre reinícios do browser)
+  } catch (_) { return "all"; }
+})();
+// reflete o projeto na URL (replaceState = sem nova entrada no histórico) + localStorage (fallback p/ aba nova)
+function persistProject(p) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set("project", p);
+    history.replaceState(null, "", url);
+    localStorage.setItem("busProject", p);
+  } catch (_) {}
+}
 // MRU dos donos do lock: quem pegou por ultimo fica em [0] (mais a esquerda). Persiste no F5.
 window.__lockMRU = (function () { try { return JSON.parse(localStorage.getItem("busLockMRU") || "[]"); } catch (_) { return []; } })();
 
@@ -932,12 +947,13 @@ async function loadProjects() {
     sel.innerHTML = '<option value="all">Todos</option>' +
       (data.projects || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
     sel.value = cur;
-    if (sel.value !== cur) { selectedProject = "all"; sel.value = "all"; }   // projeto salvo nao existe mais
+    if (sel.value !== cur) { selectedProject = "all"; sel.value = "all"; }   // projeto salvo/URL nao existe mais -> volta p/ Todos
+    persistProject(selectedProject);   // carimba ?project=... na URL -> aba fica independente e F5-safe desde o load
   } catch (_) {}
 }
 document.getElementById("projectSel").addEventListener("change", e => {
   selectedProject = e.target.value || "all";
-  try { localStorage.setItem("busProject", selectedProject); } catch (_) {}   // persiste o filtro no F5
+  persistProject(selectedProject);   // URL (?project=...) por aba + localStorage como fallback
   lastHandoffSig = "";   // força re-render ao trocar de projeto
   tick();
 });
