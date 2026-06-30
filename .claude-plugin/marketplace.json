@@ -6,7 +6,7 @@
       "name": "bus",
       "source": "./",
       "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO: /bus <slug> [projeto] CONFIGURA a sessao (identidade/prioridade/auto-recheck), /bus bare (ou o cron) PROCESSA o inbox; projetos isolados; auth por token; auto-nome por sessao; auto-recheck a cada 1min (cron */1 bare); gate de concorrencia PRE-API (hook UserPromptSubmit + lock global) p/ evitar overload da conta; prioridade por especialista; dashboard por projeto. Cross-platform (Windows PowerShell / macOS + Linux bash).",
-      "version": "0.6.23"
+      "version": "0.6.24"
     }
   ]
 }
