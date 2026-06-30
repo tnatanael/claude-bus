@@ -61,6 +61,8 @@
     flex-wrap: wrap;
   }
   .meta b { color: var(--text); font-weight: 600; }
+  #busRoot { cursor: pointer; white-space: nowrap; }
+  #busRoot:hover { text-decoration: underline dotted; opacity: .8; }
   .src {
     padding: 3px 9px;
     border-radius: 999px;
@@ -876,7 +878,7 @@ function render(state) {
     // visão agrupada: uma seção por projeto (sem conectores)
     single.style.display = "none";
     all.style.display = "";
-    document.getElementById("busRoot").textContent = "(todos os projetos)";
+    setBusRoot("(todos os projetos)");
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
       [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k =>
         (k === "inbox" ? sortInboxByWait(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id).join(","))]));
@@ -889,7 +891,7 @@ function render(state) {
   // visão de um projeto só (flow completo, com conectores)
   all.style.display = "none";
   single.style.display = "";
-  document.getElementById("busRoot").textContent = state.busRoot || "?";
+  setBusRoot(state.busRoot || "?");
   const sp = document.getElementById("singleProj");
   if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
   const ss = document.getElementById("singleSpecs");
@@ -956,6 +958,20 @@ document.getElementById("projectSel").addEventListener("change", e => {
   persistProject(selectedProject);   // URL (?project=...) por aba + localStorage como fallback
   lastHandoffSig = "";   // força re-render ao trocar de projeto
   tick();
+});
+
+// bus root: trunca em ~20 chars (mostra o FIM = o projeto); tooltip com o caminho completo; clique copia.
+function setBusRoot(full) {
+  const el = document.getElementById("busRoot"); full = full || "?";
+  el.textContent = full.length > 20 ? "…" + full.slice(-19) : full;
+  el.title = full + "  ·  clique pra copiar";
+  el.dataset.full = full;
+}
+document.getElementById("busRoot").addEventListener("click", function () {
+  const full = this.dataset.full || this.textContent;
+  if (navigator.clipboard) navigator.clipboard.writeText(full).catch(() => {});
+  const cur = this.textContent; this.textContent = "copiado ✓";
+  setTimeout(() => { this.textContent = cur; }, 900);
 });
 
 // ---- Modal: corpo puro do handoff + thread relacionada (ordem de precedencia) ----
