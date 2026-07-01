@@ -68,6 +68,16 @@ main() {
   fi
   echo "$now" > "$seenfile"
 
+  # 3a. MANUTENCAO da estrutura do BUS (pre-API, ZERO trabalho do modelo). O BUS vive em /tmp
+  # (Unix) / %TEMP% (Win), limpos por IDADE. A cada tique: garante as pastas do projeto (recria
+  # as que sumirem vazias -> o modelo nao reconstroi) e TOCA (renova mtime) .bus-secret,
+  # names/<sid>, .priority e as pastas -> nao envelhecem, nao sao apagados (secret nao rotaciona).
+  if [ -n "$project" ] && [ "$project" != "default" ]; then mroot="$base/$project"; else mroot="$base"; fi
+  mkdir -p "$mroot/inbox" "$mroot/processing" "$mroot/done" "$mroot/rejected" 2>/dev/null
+  for mp in "$mroot/.bus-secret" "$mroot/.priority" "$namefile" "$mroot/inbox" "$mroot/processing" "$mroot/done" "$mroot/rejected"; do
+    [ -e "$mp" ] && touch "$mp" 2>/dev/null
+  done
+
   # 3b. CHAMADA MANUAL (/bus <args>) = CONFIG, NAO processa. Passa direto (exit 0): o modelo
   # so registra/seta prioridade/re-arma e PARA (sem ler o inbox). Nao usa o lock (config nao
   # serializa). A prioridade do 3o arg ja foi gravada no 2a. SO o BARE /bus processa o inbox.

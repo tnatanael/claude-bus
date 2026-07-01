@@ -82,6 +82,21 @@ try {
   }
   [System.IO.File]::WriteAllText($seenFile, (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))
 
+  # 3a. MANUTENCAO da estrutura do BUS (pre-API, ZERO trabalho do modelo). O BUS vive no %TEMP%,
+  # que o Storage Sense do Windows limpa por IDADE (mtime). Rodando a cada tique do cron, o gate:
+  #   - GARANTE as pastas do projeto (recria as que sumirem vazias) -> o modelo nunca precisa
+  #     "reconstruir a estrutura";
+  #   - TOCA (renova o mtime de) .bus-secret, names/<sid>, .priority e as pastas -> nao envelhecem,
+  #     nao sao apagados -> o .bus-secret NAO rotaciona, a sessao NAO perde registro nem prioridade.
+  try {
+    $mRoot = if ($project -and $project -ne 'default') { Join-Path $base $project } else { $base }
+    New-Item -ItemType Directory -Force -Path $mRoot,(Join-Path $mRoot 'inbox'),(Join-Path $mRoot 'processing'),(Join-Path $mRoot 'done'),(Join-Path $mRoot 'rejected') | Out-Null
+    $mNow = Get-Date
+    foreach ($mp in @((Join-Path $mRoot '.bus-secret'), (Join-Path $mRoot '.priority'), $nameFile, (Join-Path $mRoot 'inbox'), (Join-Path $mRoot 'processing'), (Join-Path $mRoot 'done'), (Join-Path $mRoot 'rejected'))) {
+      if (Test-Path -LiteralPath $mp) { (Get-Item -LiteralPath $mp).LastWriteTime = $mNow }
+    }
+  } catch {}
+
   # 3b. CHAMADA MANUAL (/bus <args>) = CONFIG, NAO processa. Passa direto (exit 0): o modelo
   # so registra identidade/seta prioridade/re-arma o cron e PARA (sem ler o inbox). Nao usa o
   # lock (config nao processa, nao precisa serializar). A prioridade do 3o arg ja foi gravada
