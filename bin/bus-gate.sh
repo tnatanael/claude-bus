@@ -68,14 +68,21 @@ main() {
   fi
   echo "$now" > "$seenfile"
 
-  # 3a. MANUTENCAO da estrutura do BUS (pre-API, ZERO trabalho do modelo). O BUS vive em /tmp
-  # (Unix) / %TEMP% (Win), limpos por IDADE. A cada tique: garante as pastas do projeto (recria
-  # as que sumirem vazias -> o modelo nao reconstroi) e TOCA (renova mtime) .bus-secret,
-  # names/<sid>, .priority e as pastas -> nao envelhecem, nao sao apagados (secret nao rotaciona).
+  # 3a. MANUTENCAO da estrutura (pre-API, zero trabalho do modelo). O BUS vive em /tmp (Unix) /
+  # %TEMP% (Win), limpos por IDADE. Garante as pastas (recria as que sumirem) e RENOVA o mtime de
+  # .bus-secret/names/.priority/pastas -> nao envelhecem, nao sao apagados (secret nao rotaciona,
+  # sessao nao perde registro/prioridade, modelo nao reconstroi estrutura).
+  # CONCORRENCIA (~20 especialistas/projeto tocando os MESMOS arquivos): so toca o que ja envelheceu
+  # (mtime > 6h); quase todo tique so LE o mtime (barato, sem contencao); o toque real (escrita) sai
+  # ~4x/dia por projeto. Storage Sense limpa por DIAS, entao 6h e folgado. touch so mexe no mtime.
   if [ -n "$project" ] && [ "$project" != "default" ]; then mroot="$base/$project"; else mroot="$base"; fi
-  mkdir -p "$mroot/inbox" "$mroot/processing" "$mroot/done" "$mroot/rejected" 2>/dev/null
+  for d in inbox processing done rejected; do [ -d "$mroot/$d" ] || mkdir -p "$mroot/$d" 2>/dev/null; done
+  mcut=$(( now - 6*3600 ))
   for mp in "$mroot/.bus-secret" "$mroot/.priority" "$namefile" "$mroot/inbox" "$mroot/processing" "$mroot/done" "$mroot/rejected"; do
-    [ -e "$mp" ] && touch "$mp" 2>/dev/null
+    if [ -e "$mp" ]; then
+      mmt=$(date -r "$mp" +%s 2>/dev/null || stat -c %Y "$mp" 2>/dev/null || echo 0)
+      [ "$mmt" -lt "$mcut" ] 2>/dev/null && touch "$mp" 2>/dev/null
+    fi
   done
 
   # 3b. CHAMADA MANUAL (/bus <args>) = CONFIG, NAO processa. Passa direto (exit 0): o modelo

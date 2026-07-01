@@ -83,17 +83,23 @@ try {
   [System.IO.File]::WriteAllText($seenFile, (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))
 
   # 3a. MANUTENCAO da estrutura do BUS (pre-API, ZERO trabalho do modelo). O BUS vive no %TEMP%,
-  # que o Storage Sense do Windows limpa por IDADE (mtime). Rodando a cada tique do cron, o gate:
-  #   - GARANTE as pastas do projeto (recria as que sumirem vazias) -> o modelo nunca precisa
-  #     "reconstruir a estrutura";
-  #   - TOCA (renova o mtime de) .bus-secret, names/<sid>, .priority e as pastas -> nao envelhecem,
-  #     nao sao apagados -> o .bus-secret NAO rotaciona, a sessao NAO perde registro nem prioridade.
+  # que o Storage Sense do Windows limpa por IDADE (mtime). O gate GARANTE as pastas (recria as
+  # que sumirem) e RENOVA o mtime de .bus-secret/names/.priority/pastas -> nao envelhecem, nao
+  # sao apagados -> secret NAO rotaciona, sessao NAO perde registro/prioridade, modelo nao
+  # reconstroi estrutura.
+  # CONCORRENCIA (ate ~20 especialistas/projeto tocando os MESMOS arquivos): so tocamos o que ja
+  # esta ENVELHECENDO (mtime > 6h) e cada operacao e isolada. Assim quase todo tique so LE o mtime
+  # (barato, sem contencao); o toque real (escrita) sai ~4x/dia por projeto. Storage Sense limpa
+  # por DIAS, entao 6h e folgado. Toque so mexe no mtime (metadado), nunca no conteudo.
   try {
     $mRoot = if ($project -and $project -ne 'default') { Join-Path $base $project } else { $base }
-    New-Item -ItemType Directory -Force -Path $mRoot,(Join-Path $mRoot 'inbox'),(Join-Path $mRoot 'processing'),(Join-Path $mRoot 'done'),(Join-Path $mRoot 'rejected') | Out-Null
-    $mNow = Get-Date
+    foreach ($d in 'inbox','processing','done','rejected') {
+      $dp = Join-Path $mRoot $d
+      try { if (-not (Test-Path -LiteralPath $dp)) { New-Item -ItemType Directory -Force -Path $dp | Out-Null } } catch {}
+    }
+    $mCut = (Get-Date).AddHours(-6); $mNow = Get-Date
     foreach ($mp in @((Join-Path $mRoot '.bus-secret'), (Join-Path $mRoot '.priority'), $nameFile, (Join-Path $mRoot 'inbox'), (Join-Path $mRoot 'processing'), (Join-Path $mRoot 'done'), (Join-Path $mRoot 'rejected'))) {
-      if (Test-Path -LiteralPath $mp) { (Get-Item -LiteralPath $mp).LastWriteTime = $mNow }
+      try { $mi = Get-Item -LiteralPath $mp -ErrorAction SilentlyContinue; if ($mi -and $mi.LastWriteTime -lt $mCut) { $mi.LastWriteTime = $mNow } } catch {}
     }
   } catch {}
 
