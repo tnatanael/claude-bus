@@ -11,7 +11,7 @@ Não existe **daemon nem processo de fundo separado**: o auto-recheck é a próp
 - **Autenticação por token** — handoffs forjados vão pra quarentena (`rejected/`) antes de qualquer execução.
 - **Auto-nome por sessão** — configure o slug 1× com `/bus <slug> [projeto]`; depois é só `/bus` (bare) pra processar.
 - **Linha de despacho** — cada envio diz ao operador onde disparar o próximo `/bus`.
-- **Operação desassistida automática** — o `/bus` arma sozinho um recheck **a cada 1 min** (cron de sessão) pra processar handoffs quando você sai.
+- **Operação desassistida automática** — o `/bus` arma sozinho um recheck **a cada 1 min** (cron de sessão) pra processar handoffs quando você sai. Após reabrir o app (o cron de sessão morre no restart), religue com **`/bus-reload`** — re-arma o cron usando a identidade já registrada, **sem processar** o inbox nem mexer no lock.
 - **Gate de concorrência (anti-overload, opcional)** — um hook serializa o trabalho disparado por `/bus` num **lock global** (1 por máquina): como o limite de requisições é da **conta** Claude (não do projeto), só um especialista trabalha por vez; os demais deferem **sem gastar API**, e checagens de inbox vazia ficam de graça. Setup na seção [Gate de concorrência](#gate-de-concorrência-opcional).
 
 ## Instalação
