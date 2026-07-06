@@ -1,8 +1,8 @@
 # bus-gate.ps1 -- Hook UserPromptSubmit do BUS. Gate PRE-API do /bus.
-# Objetivo: prevenir overload da API da conta Claude (limite e da CONTA, nao do
-# projeto) e economizar contexto. Por isso o lock e UNICO e GLOBAL na maquina
-# (na base, nao por projeto): se qualquer especialista de qualquer projeto esta
-# trabalhando, os outros deferem.
+# Objetivo: prevenir overload da API da conta Claude e economizar contexto. O lock e
+# POR PROJETO (<projeto>/.bus-lock): serializa DENTRO de cada projeto (1 sessao ativa por
+# projeto), mas projetos diferentes rodam em PARALELO -- permite 2+ frentes ao mesmo tempo.
+# Tambem intercepta /bus-message (enfileira instrucao do operador SEM acordar o modelo).
 #
 # Regras (so para prompt que comeca com /bus; o resto passa direto):
 #   - lock global tomado por OUTRA sessao (fresco)        -> exit 2 (defer, custo 0)
@@ -29,12 +29,69 @@ function BusLog($base, $sid, $slug, $decision) {
   } catch {}
 }
 
+function Get-GateSecret([string]$root) {
+  # le (ou cria) o .bus-secret do projeto -- mesma logica do bus-send/bus-inbox.
+  New-Item -ItemType Directory -Force -Path $root | Out-Null
+  $path = Join-Path $root '.bus-secret'
+  if (-not (Test-Path -LiteralPath $path)) {
+    $val = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+    $tmp = $path + '.' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.tmp'
+    [System.IO.File]::WriteAllText($tmp, $val, (New-Object System.Text.UTF8Encoding($false)))
+    try { Move-Item -LiteralPath $tmp -Destination $path -ErrorAction Stop }
+    catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+  }
+  return (Get-Content -LiteralPath $path -Raw -Encoding UTF8).Trim()
+}
+
+function Enqueue-OpMessage($base, $sid, $body) {
+  # /bus-message: escreve um handoff operador->proprio-slug no inbox do projeto da sessao.
+  # Retorna 'OK:<slug>:<projeto>', ou 'NO_SID'/'NO_IDENTITY' se a sessao nao se registrou.
+  if (-not $sid) { return 'NO_SID' }
+  $nf = Join-Path (Join-Path $base 'names') ($sid + '.txt')
+  if (-not (Test-Path -LiteralPath $nf)) { return 'NO_IDENTITY' }
+  $nl = @(Get-Content -LiteralPath $nf)
+  $proj = 'default'; $slug = ''
+  if ($nl.Count -ge 2) { $proj = $nl[0].Trim(); $slug = $nl[1].Trim() }
+  elseif ($nl.Count -eq 1) { $proj = 'default'; $slug = $nl[0].Trim() }
+  if (-not $slug) { return 'NO_IDENTITY' }
+  $projRoot = if ($proj -and $proj -ne 'default') { Join-Path $base $proj } else { $base }
+  $secret = Get-GateSecret $projRoot
+  $inbox = Join-Path $projRoot 'inbox'
+  New-Item -ItemType Directory -Force -Path $inbox | Out-Null
+  $id = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6)
+  $final = Join-Path $inbox ('to-' + $slug + '__from-operador__' + $id + '.handoff')
+  $tmp = $final + '.tmp'
+  $lines = @('###BUS-START', 'id: ' + $id, 'from: operador', 'to: ' + $slug, 'auth: ' + $secret, 'reply_required: false', 'in_reply_to: ', '---', $body, '###BUS-END')
+  [System.IO.File]::WriteAllText($tmp, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+  Move-Item -LiteralPath $tmp -Destination $final
+  return ('OK:' + $slug + ':' + $proj)
+}
+
 try {
   $raw = [Console]::In.ReadToEnd()
   $data = $null
   try { $data = $raw | ConvertFrom-Json } catch {}
   $prompt = ''; $sid = ''; $slug = ''; $project = ''
   if ($data) { $prompt = [string]$data.prompt; $sid = [string]$data.session_id }
+
+  # 0. /bus-message <texto>: o operador enfileira uma instrucao pro proprio especialista
+  # da sessao. O HOOK escreve o handoff (operador->slug) e BLOQUEIA o prompt (exit 2) ->
+  # NAO acorda o modelo, custo ZERO de token. O especialista processa no proximo /bus.
+  $bm = [regex]::Match($prompt, '(?is)^\s*/bus-message\s+(.+)$')
+  if ($bm.Success) {
+    $baseM = $env:CLAUDE_BUS_ROOT; if (-not $baseM) { $baseM = Join-Path $env:TEMP 'claude-bus' }
+    try {
+      $r = Enqueue-OpMessage $baseM $sid ($bm.Groups[1].Value.Trim())
+      if ($r -like 'OK:*') {
+        $pp = $r.Substring(3) -split ':', 2
+        BusLog $baseM $sid $pp[0] 'op-message'
+        [Console]::Error.WriteLine('BUS: mensagem enfileirada para ' + $pp[0] + ' (' + $pp[1] + ') -- sera processada no proximo /bus.')
+      } else {
+        [Console]::Error.WriteLine('BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <slug> [projeto] primeiro, depois /bus-message.')
+      }
+    } catch { [Console]::Error.WriteLine('BUS: erro ao enfileirar a mensagem -- ' + $_.Exception.Message) }
+    exit 2
+  }
 
   # 1. So gateia /bus. Qualquer outro prompt passa na hora (fast-path, custo ~0).
   if ($prompt -notmatch '(?im)^\s*/bus(\s|$)') { exit 0 }
@@ -71,6 +128,8 @@ try {
   if ($nl.Count -ge 2) { $project = $nl[0].Trim(); $slug = $nl[1].Trim() }
   elseif ($nl.Count -eq 1) { $project = 'default'; $slug = $nl[0].Trim() }
   if (-not $slug) { exit 0 }
+  # Raiz do projeto (usada no lock POR PROJETO e nas prioridades).
+  $projRoot = if ($project -and $project -ne 'default') { Join-Path $base $project } else { $base }
 
   # 3. seen: mede idade antiga, depois regrava agora (prova de vida).
   $seenDir = Join-Path $base 'seen'
@@ -98,7 +157,7 @@ try {
       try { if (-not (Test-Path -LiteralPath $dp)) { New-Item -ItemType Directory -Force -Path $dp | Out-Null } } catch {}
     }
     $mCut = (Get-Date).AddHours(-6); $mNow = Get-Date
-    foreach ($mp in @((Join-Path $mRoot '.bus-secret'), (Join-Path $mRoot '.priority'), $nameFile, (Join-Path $mRoot 'inbox'), (Join-Path $mRoot 'processing'), (Join-Path $mRoot 'done'), (Join-Path $mRoot 'rejected'))) {
+    foreach ($mp in @((Join-Path $mRoot '.bus-secret'), (Join-Path $mRoot '.priority'), (Join-Path $mRoot '.bus-paused'), $nameFile, (Join-Path $mRoot 'inbox'), (Join-Path $mRoot 'processing'), (Join-Path $mRoot 'done'), (Join-Path $mRoot 'rejected'))) {
       try { $mi = Get-Item -LiteralPath $mp -ErrorAction SilentlyContinue; if ($mi -and $mi.LastWriteTime -lt $mCut) { $mi.LastWriteTime = $mNow } } catch {}
     }
   } catch {}
@@ -109,8 +168,19 @@ try {
   # no passo 2a (rede). SO o BARE /bus (cron ou manual) processa o inbox.
   if ($isManual) { exit 0 }
 
-  # 4. Lock GLOBAL (1 por maquina). Tomado por outro e fresco -> defer.
-  $lockFile = Join-Path $base '.bus-lock'
+  # 3c. PAUSA por projeto: se <projeto>/.bus-paused existe, o projeto esta PAUSADO -> nao pega
+  # NOVOS handoffs (defer, custo zero). Quem ja esta processando (segurando o lock) termina o
+  # turno normalmente -- o gate so age ANTES de acordar o modelo. Config (/bus <args>) e
+  # /bus-message ja passaram antes daqui, entao seguem funcionando com o projeto pausado.
+  if (Test-Path -LiteralPath (Join-Path $projRoot '.bus-paused')) {
+    [Console]::Error.WriteLine('BUS: projeto ' + $project + ' PAUSADO -- deferido ate dar play no dashboard.')
+    BusLog $base $sid $slug 'defer-paused'
+    exit 2
+  }
+
+  # 4. Lock POR PROJETO (<projeto>/.bus-lock): serializa DENTRO do projeto; projetos
+  # diferentes rodam em PARALELO. Tomado por OUTRA sessao do MESMO projeto e fresco -> defer.
+  $lockFile = Join-Path $projRoot '.bus-lock'
   $now = [datetimeoffset]::Now
   if (Test-Path -LiteralPath $lockFile) {
     try {
@@ -127,8 +197,7 @@ try {
   # 5. PRIORIDADES do projeto: arquivo <projroot>/.priority, linhas "slug:N" (default 1000;
   # quanto MENOR, mais cede a vez). Depois varre o inbox: eu tenho pendente? e algum
   # especialista de prioridade MAIOR tem pendente?
-  $projRoot = $base
-  if ($project -and $project -ne 'default') { $projRoot = Join-Path $base $project }
+  # $projRoot ja resolvido acima (passo 2).
   $prio = @{}
   $prioFile = Join-Path $projRoot '.priority'
   if (Test-Path -LiteralPath $prioFile) {
@@ -199,7 +268,8 @@ try {
   $base2 = $env:CLAUDE_BUS_ROOT; if (-not $base2) { $base2 = Join-Path $env:TEMP 'claude-bus' }
   try {
     if ($prompt -match '(?im)^\s*/bus(\s|$)' -and $sid) {
-      $lf = Join-Path $base2 '.bus-lock'; $nw = [datetimeoffset]::Now
+      $lockRoot2 = if ($project -and $project -ne 'default') { Join-Path $base2 $project } else { $base2 }
+      $lf = Join-Path $lockRoot2 '.bus-lock'; $nw = [datetimeoffset]::Now
       $obj2 = (@{ sid=$sid; slug=$slug; project=$project; since=$nw.ToString('o'); expiry=$nw.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
       $enc2 = New-Object System.Text.UTF8Encoding($false); $got = $false
       try {

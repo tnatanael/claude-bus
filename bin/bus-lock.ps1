@@ -1,11 +1,20 @@
-# bus-lock.ps1 -Release  -> libera o lock GLOBAL do BUS se for desta sessao (no-op se nao for).
-# O lock e UNICO por maquina (na base do BUS), porque o limite de API e da CONTA Claude,
-# nao do projeto: um especialista trabalhando segura todos os outros, de qualquer projeto.
-param([switch]$Release)
+# bus-lock.ps1 -Release  -> libera o lock do PROJETO desta sessao se for dela (no-op se nao).
+# O lock e POR PROJETO (<projeto>/.bus-lock): serializa DENTRO do projeto, mas projetos
+# diferentes rodam em paralelo. O projeto e resolvido do names/<sid> (ou -Project explicito).
+param([switch]$Release, [string]$Project = '')
 try {
   $base = $env:CLAUDE_BUS_ROOT; if (-not $base) { $base = Join-Path $env:TEMP 'claude-bus' }
-  $lock = Join-Path $base '.bus-lock'
   $sid  = $env:CLAUDE_CODE_SESSION_ID
+  # Projeto: -Project explicito vence; senao resolve do registro global names/<sid>.
+  if ($Project -eq '' -and $sid) {
+    $nf = Join-Path (Join-Path $base 'names') ($sid + '.txt')
+    if (Test-Path -LiteralPath $nf) {
+      $nl = @(Get-Content -LiteralPath $nf)
+      if ($nl.Count -ge 2) { $Project = $nl[0].Trim() } elseif ($nl.Count -eq 1) { $Project = 'default' }
+    }
+  }
+  $projRoot = if ($Project -and $Project -ne 'default') { Join-Path $base $Project } else { $base }
+  $lock = Join-Path $projRoot '.bus-lock'
   if ($Release) {
     if ((Test-Path -LiteralPath $lock) -and $sid) {
       $L = $null

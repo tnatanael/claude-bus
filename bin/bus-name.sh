@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bus-name.sh [slug] [project] [priority]   (par Unix do bus-name.ps1)
 # Sem args: ecoa o registrado (PROJECT=/SLUG=/BUS_CRON_MINUTE=) ou 'NONE'.
-# Com args: grava (project default='default') e ecoa. [priority] (>=0) faz upsert de
+# Com args: grava (projeto OBRIGATORIO; faltando ou 'default' -> NEED_PROJECT) e ecoa. [priority] (>=0) faz upsert de
 # "slug:N" no <projroot>/.priority (prioridade do gate; default 1000; menor cede mais).
 # Compat: 1 linha antiga = projeto 'default'.
 # names/ fica na raiz BASE (registro global); o isolamento por projeto e nas pastas de handoff.
@@ -25,7 +25,11 @@ cronmin=$((cronmin % 60))
 emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$cronmin"; }
 
 if [ -n "${1:-}" ]; then
-  proj="${2:-default}"; [ -z "$proj" ] && proj="default"
+  proj="${2:-}"
+  if [ -z "$proj" ] || [ "$proj" = "default" ]; then
+    echo "NEED_PROJECT"   # projeto e OBRIGATORIO (o 'default' foi removido)
+    exit 0
+  fi
   printf '%s\n%s' "$proj" "$1" > "$f"
   # EVICCAO DE GHOST: este (projeto, slug) agora e DESTA sessao. Apaga names/<outroSid> com o
   # MESMO (projeto, slug) + o seen dele -- sessao morta re-registrada NAO vira ghost no BUS.

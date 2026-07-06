@@ -259,8 +259,8 @@ function listProjects() {
     if (isDir) set.add(name);
   }
   for (const p of Object.keys(readRoster())) set.add(p);
-  set.delete('default');
-  return ['default', ...[...set].sort()];
+  set.delete('default');   // 'default' foi removido -> nunca listado (projeto e obrigatorio)
+  return [...set].sort();
 }
 
 function queryParam(reqUrl, key) {
@@ -306,17 +306,23 @@ function attachToCron(handoffs, specs, projRoot) {
   }
 }
 
-// Lock GLOBAL de concorrencia (1 por maquina, na BASE -- o limite de API e da CONTA,
-// nao do projeto): quem esta "trabalhando agora". null se livre ou expirado.
-function readLockHolder() {
+// Lock POR PROJETO (<projeto>/.bus-lock): quem esta "trabalhando agora" naquele projeto.
+// Projetos diferentes tem locks independentes (rodam em paralelo). null se livre/expirado.
+function readLockHolder(root) {
   try {
-    const raw = safeReadText(path.join(BUS_ROOT, '.bus-lock'));
+    const raw = safeReadText(path.join(root || BUS_ROOT, '.bus-lock'));
     if (!raw) return null;
     const L = JSON.parse(raw);
     const expSec = Math.floor(new Date(L.expiry).getTime() / 1000);
     if (!(Math.floor(Date.now() / 1000) < expSec)) return null;   // expirado => ninguem
     return { slug: L.slug || '?', project: L.project || 'default', since: L.since || null, expiry: L.expiry || null };
   } catch (_) { return null; }
+}
+
+// PAUSA por projeto: presenca do marcador <projeto>/.bus-paused. Enquanto pausado, o gate
+// defere o processamento (bare /bus) daquele projeto -- sem interromper quem ja trabalha.
+function readPaused(root) {
+  try { return fs.existsSync(path.join(root, '.bus-paused')); } catch (_) { return false; }
 }
 
 function buildPayload(p) {
@@ -327,15 +333,16 @@ function buildPayload(p) {
     const projects = listProjects().map(name => {
       const st = buildState(projectRoot(name));
       attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
-      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts };
+      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder: readLockHolder(projectRoot(name)), paused: readPaused(projectRoot(name)) };
     });
-    return { now, all: true, projects, holder: readLockHolder() };
+    return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean) };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
   st.specialists = roster[p] || [];
   attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
-  st.holder = readLockHolder();
+  st.holder = readLockHolder(projectRoot(p));
+  st.paused = readPaused(projectRoot(p));
   return st;
 }
 
@@ -462,6 +469,37 @@ const server = http.createServer((req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'failed to build state', detail: String(e) }));
     }
+    return;
+  }
+
+  // Unica ESCRITA do dashboard: liga/desliga a pausa de um projeto (marcador .bus-paused).
+  // So toca esse marcador; nome do projeto validado (anti path-traversal).
+  if (req.method === 'POST' && urlPath === '/api/pause') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const d = JSON.parse(body || '{}');
+        const proj = d.project;
+        if (!proj || proj === 'all' || !/^[a-zA-Z0-9_-]+$/.test(proj)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'valid project required' }));
+          return;
+        }
+        const root = projectRoot(proj);
+        const marker = path.join(root, '.bus-paused');
+        if (d.paused) {
+          try { fs.mkdirSync(root, { recursive: true }); } catch (_) {}
+          fs.writeFileSync(marker, new Date().toISOString());
+        } else {
+          try { fs.unlinkSync(marker); } catch (_) {}
+        }
+        sendJson(res, { project: proj, paused: !!d.paused });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
     return;
   }
 

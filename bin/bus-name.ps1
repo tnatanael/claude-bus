@@ -46,7 +46,11 @@ function Emit([string]$proj, [string]$slug) {
 }
 
 if ($Set -ne '') {
-  $proj = $Project.Trim(); if ($proj -eq '') { $proj = 'default' }
+  $proj = $Project.Trim()
+  if ($proj -eq '' -or $proj -eq 'default') {
+    Write-Output 'NEED_PROJECT'   # projeto e OBRIGATORIO (o 'default' foi removido)
+    exit 0
+  }
   $slug = $Set.Trim()
   $enc = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($f, $proj + "`n" + $slug, $enc)

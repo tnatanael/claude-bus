@@ -61,6 +61,12 @@
     flex-wrap: wrap;
   }
   .meta b { color: var(--text); font-weight: 600; }
+  #projectSel { background: rgba(88,166,255,.14); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 9px; font-size: 13px; font-weight: 700; cursor: pointer; outline: none; }
+  #projectSel:hover { background: rgba(88,166,255,.24); }
+  #projectSel option { background: var(--panel-2); color: var(--text); font-weight: 600; }
+  .proj-controls { display: inline-flex; align-items: center; gap: 8px; }
+  .proj-edit { margin-left: 7px; padding: 1px 6px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; vertical-align: middle; line-height: 1; }
+  .proj-edit:hover { background: rgba(255,255,255,.08); color: var(--text); }
   #busRoot { cursor: pointer; white-space: nowrap; }
   #busRoot:hover { text-decoration: underline dotted; opacity: .8; }
   .src {
@@ -344,17 +350,25 @@
   .next-check { font-family: var(--mono); font-size: 11px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3); border-radius: 6px; padding: 1px 8px; margin-right: 4px; cursor: help; }
   .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   .arm-dot.armed { background: var(--green); }
-.lockbar { margin: 8px 0 0; padding: 6px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; }
+.lockbar { flex: 0 0 auto; width: 210px; margin: 0; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: nowrap; line-height: 1.35; text-align: center; }
+.proj-title { color: var(--accent); font-weight: 700; }
+.hammer { display: inline-block; transform-origin: 75% 75%; animation: hammer-tap .55s ease-in-out infinite; }
+@keyframes hammer-tap { 0%,100% { transform: rotate(-20deg); } 55% { transform: rotate(12deg); } }
 .lockbar.busy { background: rgba(224,160,0,.14); border-color: rgba(224,160,0,.5); }
 .lockbar.free { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.06); color: #8a93a3; }
 .lockbar .lk-slug { font-weight: 700; color: #ffcf66; }
 .lockbar .lk-proj { opacity: .7; }
 .lockbar .lk-free { font-weight: 600; }
 .lockbar .lk-lease { color: #ffcf66; }
+.pausebtn { margin-left: 8px; padding: 2px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: #cdd3dc; }
+.pausebtn:hover { border-color: rgba(255,255,255,.35); }
+.pausebtn.running { background: rgba(224,160,0,.14); border-color: rgba(224,160,0,.45); color: #ffcf66; }
+.pausebtn.paused { background: rgba(80,200,120,.16); border-color: rgba(80,200,120,.55); color: #7fe0a0; }
 .lk-info { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:5px; border-radius:50%; background:rgba(255,255,255,.18); color:#fff; font-size:11px; font-weight:700; cursor:help; position:relative; vertical-align:middle; }
 .lk-info .lk-tip { display:none; position:absolute; top:150%; right:0; z-index:50; width:310px; padding:10px 12px; border-radius:8px; background:#1b1f27; border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 28px rgba(0,0,0,.55); color:#dfe4ea; font-size:12px; font-weight:400; line-height:1.5; text-align:left; white-space:normal; }
 .lk-info:hover .lk-tip, .lk-info:focus .lk-tip { display:block; }
 .lk-tip code { background:rgba(255,255,255,.12); padding:0 3px; border-radius:3px; }
+.lk-info.info-left .lk-tip { right:auto; left:0; }
 .spec-chip.working { border-color: rgba(224,160,0,.7); box-shadow: 0 0 0 2px rgba(224,160,0,.35); }
   .arm-dot.cold { background: var(--red); }
   /* Modal de leitura de handoff + thread */
@@ -381,9 +395,9 @@
 </head>
 <body>
 <header>
-  <h1><span class="dot">●</span> BUS Live Dashboard</h1>
+  <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco — o dashboard nunca escreve nos handoffs (só o botão Pausar toca o marcador de pausa). Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span><span class="proj-title" id="projTitle"></span><button id="projEdit" class="proj-edit" title="Trocar projeto" style="display:none">✏️</button></h1>
+  <span class="proj-controls"><select id="projectSel" style="display:none"><option value="">— selecione —</option></select><button id="pauseBtn" class="pausebtn" style="display:none"></button></span>
   <div class="meta">
-    <span>projeto: <select id="projectSel"><option value="all">Todos</option></select></span>
     <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
     <span>bus root: <b id="busRoot">…</b></span>
     <span>now: <b id="now">…</b></span>
@@ -393,6 +407,7 @@
 </header>
 
 <main>
+  <div id="pickProj" style="display:none; padding:48px 16px; text-align:center; color:#8a93a3; font-size:15px">Selecione um projeto no seletor acima para ver o board.</div>
   <section id="allSection"></section>
   <section id="singleSection" style="display:none">
     <div class="section-title">Handoff Flow <span class="section-proj" id="singleProj"></span> <span class="hint">inbox = pendentes (rode /bus no destino) · setas = vínculo de resposta</span></div>
@@ -437,8 +452,6 @@
   </section>
 </main>
 
-<footer id="foot">BUS Live Dashboard · read-only view of the claude-bus on disk · refresh every 1.5s · reply links drawn from inReplyTo · clique num card pra ler o handoff e a thread</footer>
-
 <div id="modal" class="modal-backdrop" hidden>
   <div class="modal-box">
     <div class="modal-head"><span id="modalTitle">Handoff</span><button id="modalClose" class="modal-x" title="fechar (Esc)">×</button></div>
@@ -458,8 +471,8 @@ let selectedProject = (function () {
   try {
     const u = new URLSearchParams(location.search).get("project");
     if (u) return u;                                       // ?project=... = fonte da verdade: independente POR ABA, sobrevive ao F5, link compartilhável
-    return localStorage.getItem("busProject") || "all";   // fallback: último usado (aba nova / entre reinícios do browser)
-  } catch (_) { return "all"; }
+    return localStorage.getItem("busProject") || "";      // sem projeto escolhido -> board oculto (seletor obrigatório)
+  } catch (_) { return ""; }
 })();
 // reflete o projeto na URL (replaceState = sem nova entrada no histórico) + localStorage (fallback p/ aba nova)
 function persistProject(p) {
@@ -662,11 +675,11 @@ function fmtHM(iso) {
   catch (_) { return "?"; }
 }
 function highlightHolderChip() {
-  const slug = window.__lockHolderSlug || null;
+  const set = new Set(window.__lockHolderSlugs || []);
   document.querySelectorAll(".spec-chip").forEach(c =>
-    c.classList.toggle("working", !!slug && c.getAttribute("data-slug") === slug));
+    c.classList.toggle("working", set.has(c.getAttribute("data-slug"))));
 }
-const LOCK_TIP = '<span class="lk-info" tabindex="0">!<span class="lk-tip"><b>Lock de concorrência</b><br>Só <b>1 especialista trabalha por vez na conta inteira</b> — o limite de requisições da API é da <b>conta</b> Claude, não do projeto. Quem pega um handoff segura este lock; os demais <code>/bus</code> deferem <b>sem gastar API</b> (bloqueados pelo hook antes de acordar o modelo) e tentam de novo no próximo tique do cron (~30 min). Se a sessão que segura cair, o lock <b>expira sozinho</b> pelo lease e libera os outros.</span></span>';
+const LOCK_TIP = '<span class="lk-info" tabindex="0">!<span class="lk-tip"><b>Lock de concorrência (por projeto)</b><br>Cada projeto tem <b>1 lock próprio</b>: só <b>1 especialista trabalha por vez dentro do projeto</b>, mas <b>projetos diferentes rodam em paralelo</b>. Quem pega um handoff segura o lock do seu projeto; os demais <code>/bus</code> do <b>mesmo</b> projeto deferem <b>sem gastar API</b> (bloqueados pelo hook antes de acordar o modelo) e tentam de novo no próximo tique (~1 min). Se a sessão que segura cair, o lock <b>expira sozinho</b> pelo lease.</span></span>';
 
 // Atualiza o MRU: novo dono do lock vai pro topo (esquerda), mantendo a ordem atras dele.
 function noteHolderMRU(holder) {
@@ -684,16 +697,33 @@ function renderHolder(holder) {
   if (!bar) return;
   if (holder && holder.slug) {
     window.__lockHolderSlug = holder.slug;
+    window.__lockHolderSlugs = [holder.slug];
     bar.className = "lockbar busy";
     const remMin = holder.expiry ? Math.max(0, Math.round((new Date(holder.expiry).getTime() - Date.now()) / 60000)) : null;
-    const leaseTxt = (remMin != null) ? ' · <span class="lk-lease">lease expira ~' + remMin + 'm</span>' : '';
-    bar.innerHTML = '🔒 <b>Trabalhando agora:</b> <span class="lk-slug">' + esc(holder.slug) +
-      '</span> <span class="lk-proj">(' + esc(holder.project || "default") + ')</span> · desde ' +
-      fmtHM(holder.since) + leaseTxt + ' ' + LOCK_TIP;
+    const leaseTxt = (remMin != null) ? ' · <span class="lk-lease">~' + remMin + 'm</span>' : '';
+    bar.innerHTML = '<span class="hammer">🔨</span> <span class="lk-slug">' + esc(holder.slug) + '</span>' + leaseTxt + ' ' + LOCK_TIP;
   } else {
     window.__lockHolderSlug = null;
+    window.__lockHolderSlugs = [];
     bar.className = "lockbar free";
-    bar.innerHTML = '🔓 <span class="lk-free">lock livre</span> · ninguém trabalhando ' + LOCK_TIP;
+    bar.innerHTML = '🔓 <span class="lk-free">livre</span> ' + LOCK_TIP;
+  }
+  highlightHolderChip();
+}
+
+// Visao "Todos": um holder por projeto que estiver trabalhando (locks independentes).
+function renderHolders(holders) {
+  const bar = document.getElementById("lockbar");
+  if (!bar) return;
+  holders = holders || [];
+  window.__lockHolderSlug = null;
+  window.__lockHolderSlugs = holders.map(h => h.slug);
+  if (holders.length) {
+    bar.className = "lockbar busy";
+    bar.innerHTML = '<span class="hammer">🔨</span> <span class="lk-slug">' + holders.length + '</span> ativo' + (holders.length > 1 ? 's' : '') + ' ' + LOCK_TIP;
+  } else {
+    bar.className = "lockbar free";
+    bar.innerHTML = '🔓 <span class="lk-free">livre</span> ' + LOCK_TIP;
   }
   highlightHolderChip();
 }
@@ -868,9 +898,34 @@ function cssEscape(s) {
   return String(s).replace(/[^a-zA-Z0-9_-]/g, ch => "\\" + ch);
 }
 
+// Projeto no titulo, em MAIUSCULAS com espaco (backend -> BACKEND, my-api -> MY API).
+function projLabel(p) {
+  return String(p || "").replace(/[-_\s]+/g, " ").trim().toUpperCase();
+}
+function setProjTitle(state) {
+  const el = document.getElementById("projTitle");
+  if (!el) return;
+  if (!state || (!state.project && !state.all)) { el.textContent = ""; return; }
+  el.textContent = state.all ? " · TODOS" : (" · " + projLabel(state.project));
+}
+
+// Botao Pausar/Retomar -- so na visao de projeto unico (a pausa e por projeto).
+function renderPause(state) {
+  const btn = document.getElementById("pauseBtn");
+  if (!btn) return;
+  if (!state || state.all || !state.project) { btn.style.display = "none"; return; }
+  btn.style.display = "";
+  btn.dataset.project = state.project;
+  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶ Retomar"; btn.dataset.paused = "1"; }
+  else { btn.className = "pausebtn running"; btn.textContent = "⏸ Pausar"; btn.dataset.paused = "0"; }
+}
+
 function render(state) {
   document.getElementById("now").textContent = fmtClock(state.now);
   noteHolderMRU(state.holder);   // atualiza o MRU antes de desenhar os chips
+  renderPause(state);
+  setProjTitle(state);
+  syncProjUI();
   const single = document.getElementById("singleSection");
   const all = document.getElementById("allSection");
 
@@ -884,7 +939,7 @@ function render(state) {
         (k === "inbox" ? sortInboxByWait(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     updateEtas();
-    renderHolder(state.holder);
+    renderHolders(state.holders);
     return;
   }
 
@@ -911,6 +966,17 @@ function render(state) {
 }
 
 async function tick() {
+  if (!selectedProject) {   // seletor obrigatório: sem projeto escolhido, o board fica oculto
+    document.getElementById("allSection").style.display = "none";
+    document.getElementById("singleSection").style.display = "none";
+    const pk = document.getElementById("pickProj"); if (pk) pk.style.display = "";
+    renderPause(null);
+    setProjTitle(null);
+    syncProjUI();
+    setBusRoot("(selecione um projeto)");
+    return;
+  }
+  const pk0 = document.getElementById("pickProj"); if (pk0) pk0.style.display = "none";
   try {
     const r = await fetch(API + "?project=" + encodeURIComponent(selectedProject), { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -946,18 +1012,58 @@ async function loadProjects() {
     const data = await r.json();
     const sel = document.getElementById("projectSel");
     const cur = selectedProject;
-    sel.innerHTML = '<option value="all">Todos</option>' +
+    sel.innerHTML = '<option value="">— selecione —</option>' +
       (data.projects || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
     sel.value = cur;
-    if (sel.value !== cur) { selectedProject = "all"; sel.value = "all"; }   // projeto salvo/URL nao existe mais -> volta p/ Todos
+    if (sel.value !== cur) { selectedProject = ""; sel.value = ""; }   // projeto salvo/URL nao existe mais -> exige nova escolha
     persistProject(selectedProject);   // carimba ?project=... na URL -> aba fica independente e F5-safe desde o load
+    syncProjUI();
   } catch (_) {}
 }
+let editingProject = false;
+// Por padrao o seletor fica OCULTO quando ja ha projeto (mostra o nome + lapis). O lapis
+// revela o seletor; escolher um projeto (ou clicar fora) fecha de novo. Sem projeto -> seletor visivel.
+function syncProjUI() {
+  const sel = document.getElementById("projectSel");
+  const edit = document.getElementById("projEdit");
+  const title = document.getElementById("projTitle");
+  if (!sel || !edit || !title) return;
+  const hasProj = !!selectedProject;
+  const showSel = !hasProj || editingProject;
+  sel.style.display = showSel ? "" : "none";
+  edit.style.display = (hasProj && !editingProject) ? "" : "none";
+  title.style.display = (hasProj && !editingProject) ? "" : "none";
+}
 document.getElementById("projectSel").addEventListener("change", e => {
-  selectedProject = e.target.value || "all";
+  selectedProject = e.target.value || "";
+  editingProject = false;
   persistProject(selectedProject);   // URL (?project=...) por aba + localStorage como fallback
   lastHandoffSig = "";   // força re-render ao trocar de projeto
+  syncProjUI();
   tick();
+});
+document.getElementById("projectSel").addEventListener("blur", () => {
+  // clicar fora fecha a edicao (deixa o change processar antes); so se ja houver projeto
+  setTimeout(() => { if (selectedProject) { editingProject = false; syncProjUI(); } }, 150);
+});
+document.getElementById("projEdit").addEventListener("click", () => {
+  editingProject = true;
+  syncProjUI();
+  document.getElementById("projectSel").focus();
+});
+// Botao Pausar/Retomar -> liga/desliga a pausa do projeto selecionado (POST /api/pause).
+document.getElementById("pauseBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const proj = btn.dataset.project;
+  if (!proj || proj === "all") return;
+  const newPaused = btn.dataset.paused !== "1";
+  btn.disabled = true;
+  try {
+    await fetch("/api/pause", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: proj, paused: newPaused }) });
+    lastHandoffSig = "";
+    await tick();
+  } catch (_) {}
+  btn.disabled = false;
 });
 
 // bus root: trunca em ~20 chars (mostra o FIM = o projeto); tooltip com o caminho completo; clique copia.
