@@ -68,7 +68,14 @@ function Enqueue-OpMessage($base, $sid, $body) {
 }
 
 try {
-  $raw = [Console]::In.ReadToEnd()
+  # Le o stdin como UTF-8 EXPLICITO: [Console]::In usa o code page do console (nao UTF-8) no
+  # PS 5.1 -> acentos do prompt JSON (ex.: "e" com acento) corrompiam no /bus-message. O
+  # StreamReader UTF-8 decodifica os bytes certos. Fallback pro reader padrao se falhar.
+  $raw = ''
+  try {
+    $sr = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8)
+    $raw = $sr.ReadToEnd(); $sr.Close()
+  } catch { try { $raw = [Console]::In.ReadToEnd() } catch {} }
   $data = $null
   try { $data = $raw | ConvertFrom-Json } catch {}
   $prompt = ''; $sid = ''; $slug = ''; $project = ''
