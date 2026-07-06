@@ -78,6 +78,7 @@
   }
   .src.live { background: rgba(46,160,67,0.15); color: var(--green); border: 1px solid rgba(46,160,67,0.4); }
   .src.mock { background: rgba(210,153,34,0.15); color: var(--amber); border: 1px solid rgba(210,153,34,0.4); }
+  .src.connecting { background: rgba(139,147,163,0.15); color: #8a93a3; border: 1px solid rgba(139,147,163,0.4); }
   .src.down { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.4); }
   .pulse {
     display: inline-block;
@@ -467,6 +468,7 @@
 
 const POLL_MS = 1500;
 const API = "/api/state";
+const MOCK_MODE = new URLSearchParams(location.search).has("mock");  // ?mock=1 = demo sem servidor; senao "conectando" ate o server subir
 let selectedProject = (function () {
   try {
     const u = new URLSearchParams(location.search).get("project");
@@ -519,7 +521,7 @@ let hoveredId = null;        // preserved across polls so hover survives a refre
 function setSource(mode) {
   const el = document.getElementById("src");
   el.className = "src " + mode;
-  el.textContent = mode === "live" ? "LIVE" : (mode === "mock" ? "MOCK DATA" : "BACKEND DOWN");
+  el.textContent = mode === "live" ? "LIVE" : (mode === "mock" ? "MOCK DATA" : (mode === "connecting" ? "CONECTANDO…" : "BACKEND DOWN"));
   document.getElementById("pulse").classList.toggle("on", mode !== "down");
 }
 
@@ -969,7 +971,7 @@ async function tick() {
   if (!selectedProject) {   // seletor obrigatório: sem projeto escolhido, o board fica oculto
     document.getElementById("allSection").style.display = "none";
     document.getElementById("singleSection").style.display = "none";
-    const pk = document.getElementById("pickProj"); if (pk) pk.style.display = "";
+    const pk = document.getElementById("pickProj"); if (pk) { pk.textContent = "Selecione um projeto no seletor acima para ver o board."; pk.style.display = ""; }
     renderPause(null);
     setProjTitle(null);
     syncProjUI();
@@ -987,9 +989,18 @@ async function tick() {
   } catch (e) {
     if (usedLiveOnce) {
       setSource("down");
-    } else {
+    } else if (MOCK_MODE) {
       setSource("mock");
       render(mockState());
+    } else {
+      // Ainda nao teve nenhum hit live -- no boot o browser (Startup) abre a pagina ANTES do
+      // servidor Node (Startup) subir. Mostra "CONECTANDO..." honesto (NADA de dado fake) ate
+      // o servidor responder. Mock so em modo demo explicito (?mock=1).
+      setSource("connecting");
+      document.getElementById("allSection").style.display = "none";
+      document.getElementById("singleSection").style.display = "none";
+      const pk = document.getElementById("pickProj");
+      if (pk) { pk.textContent = "Conectando ao servidor…"; pk.style.display = ""; }
     }
   }
 }
