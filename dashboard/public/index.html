@@ -262,6 +262,8 @@
   .column.processing .handoff { border-left-color: var(--amber); }
   .column.done .handoff { border-left-color: var(--green); }
   .handoff.linkable { cursor: pointer; }
+  .cancel-op { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; padding: 0; line-height: 16px; text-align: center; border-radius: 4px; border: 1px solid rgba(248,81,73,0.4); background: rgba(248,81,73,0.12); color: #f85149; font-size: 11px; font-family: inherit; cursor: pointer; opacity: 0.55; z-index: 2; }
+  .cancel-op:hover { opacity: 1; background: rgba(248,81,73,0.28); }
   .handoff.hl {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(88,166,255,0.18);
@@ -567,7 +569,11 @@ function idToEpoch(id) {
   return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
 }
 
-function handoffCard(it, idSet, proj) {
+function handoffCard(it, idSet, proj, cancelable) {
+  // Handoff do operador (via /bus-message) ainda no inbox -> botao de cancelar.
+  const cancelBtn = (cancelable && it.from === "operador")
+    ? `<button class="cancel-op" title="Cancelar esta mensagem do operador (remove do inbox)">✕</button>`
+    : "";
   const replyTag = it.replyRequired ? '<span class="tag reply">reply required</span>' : "";
   const parentPresent = it.inReplyTo && idSet && idSet.has(it.inReplyTo);
   let linkTag = "";
@@ -588,6 +594,7 @@ function handoffCard(it, idSet, proj) {
   const prioTag = `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
   return `
     <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
+      ${cancelBtn}
       <div class="route">
         <span class="from">${esc(it.from)}</span>
         <span class="ar">→</span>
@@ -756,7 +763,7 @@ function renderAll(projects) {
 function renderColumn(elId, items, idSet, proj) {
   const el = document.getElementById(elId);
   if (!items || !items.length) { el.innerHTML = '<div class="empty">empty</div>'; return; }
-  el.innerHTML = items.map(it => handoffCard(it, idSet, proj)).join("");
+  el.innerHTML = items.map(it => handoffCard(it, idSet, proj, elId === "inbox")).join("");
 }
 
 function renderRejected(items, idSet, proj) {
@@ -1133,11 +1140,24 @@ document.getElementById("modalClose").addEventListener("click", closeModal);
 document.getElementById("modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
 document.getElementById("threadList").addEventListener("click", e => { const t = e.target.closest(".thread-item[data-id]"); if (t) showThreadDetail(t.getAttribute("data-id")); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+async function cancelOpMessage(proj, id) {
+  if (!confirm("Cancelar esta mensagem do operador? Ela será removida do inbox antes de ser processada.")) return;
+  try {
+    await fetch("/api/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: proj, id }) });
+  } catch (_) {}
+  tick();   // refresh imediato
+}
 function onCardClick(e) {
   const card = e.target.closest(".handoff[data-id]");
   if (!card) return;
   const proj = card.getAttribute("data-project") || selectedProject;
   if (!proj || proj === "all") return;
+  // botao de cancelar (mensagem do operador no inbox) -> NAO abre o modal
+  if (e.target.closest(".cancel-op")) {
+    e.stopPropagation();
+    cancelOpMessage(proj, card.getAttribute("data-id"));
+    return;
+  }
   openModal(proj, card.getAttribute("data-id"));
 }
 document.getElementById("flowArea").addEventListener("click", onCardClick);

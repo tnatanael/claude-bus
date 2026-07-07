@@ -503,6 +503,40 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Cancela um handoff do OPERADOR (via /bus-message) que ainda esta no INBOX -- caso o
+  // operador mude de ideia. Guardrails: so from-operador, so no inbox (nao mexe em trabalho
+  // de especialista nem no que ja foi pra processing/done), project+id validados (sem traversal).
+  if (req.method === 'POST' && urlPath === '/api/cancel') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const d = JSON.parse(body || '{}');
+        const proj = d.project;
+        const id = String(d.id || '');
+        if (!proj || proj === 'all' || !/^[a-zA-Z0-9_-]+$/.test(proj) || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'valid project and id required' }));
+          return;
+        }
+        const inbox = path.join(projectRoot(proj), 'inbox');
+        let deleted = null;
+        for (const f of (safeReaddir(inbox) || [])) {
+          const parsed = parseHandoffFilename(f);
+          if (parsed && parsed.id === id && parsed.from === 'operador') {
+            try { fs.unlinkSync(path.join(inbox, f)); deleted = f; } catch (_) {}
+            break;
+          }
+        }
+        sendJson(res, { ok: !!deleted, id, deleted });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'GET' && urlPath === '/api/events') {
     handleEvents(req, res);
     return;
