@@ -92,7 +92,12 @@ O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2
 - **Output pro operador: o mínimo.** O operador não lê o chat de cada especialista — fale o **mínimo** (no máximo 1 linha, ou nada); não anuncie despacho nem narre a mecânica. Resumo detalhado é sob demanda (e, havendo controlador, é papel dele).
 
 ### ⚠️ Mantenha o fio vivo — a decisão do "posso encerrar?"
-O auto-recheck (cron) é a **campainha do seu inbox, não o despertador do seu plano**: só te acorda por **handoff no inbox** — **nunca** pra retomar seu plano/memória. Encerrar com "continuo no próximo tick" quando o trabalho está **na sua cabeça** = **o fio MORRE** (o gate defere todo tique vazio, `nada pendente — pulando`, até um `/bus` manual). **Isso trava o bus.** Antes de encerrar, **percorra esta decisão** — e só pare no fim dela:
+**Você NUNCA pausa a SUA própria entrega esperando o operador** — ele não itera a sua frente nem te manda "continua". **Proibido, sem exceção:**
+- ❌ **Pedir `/clear` ou "sessão fresca".** O contexto **compacta sozinho** quando enche — você não perde nada; `/clear` **APAGA** seu estado. Quer um contexto limpo pra uma peça delicada? O **self-handoff JÁ te dá isso**: o próximo tique é um **wake novo** com o plano re-injetado do handoff. `/clear` nunca é a resposta.
+- ❌ **Ficar "dormente"/"stand-down" esperando o operador retomar o SEU trabalho.** Ninguém te acorda pra isso — o cron só dispara com **handoff no inbox**. Fio parado = **bus travado**.
+- ❌ **Fatiar a SUA entrega em "passadas" que dependem de você ser re-chamado na mão.** É seu e continua? Ou **faça agora**, ou **self-handoff** (que te re-acorda sozinho). O operador **não é um passo** do seu fluxo.
+
+O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de encerrar, **percorra esta decisão** — e só pare no fim dela:
 1. **Tenho passos do meu plano que NÃO dependem de terceiros?** → **faça-os agora**, neste turno (não fatie o seu trabalho em tiques).
 2. **Preciso de algo de outro especialista?** → **já enviei o handoff?** **Não** → **envie agora** (o *enviar* confirma o `SENT=`); nunca "espere" o que não pediu. **Sim, aguardando** → dá pra **avançar em OUTRA frente**? Avance; senão pode encerrar — quando o destino responder, **o seu cron te acorda** (o retorno cai no inbox). *(Não vigie o outro; se ele estiver offline, quem religa é o operador — avise-o.)*
 3. **É uma tarefa longa MINHA que não fecha neste wake** (build de N peças, migração, auditoria)? → **self-handoff**: *enviar* com `-To <você> -From <você>` (`--to`/`--from`), **SEM** `-ReplyRequired`/`--reply`, com "continua no checkpoint X" → o seu próprio cron te re-acorda pra seguir. Commite cada peça verde + externalize plano/checkpoint num arquivo.
