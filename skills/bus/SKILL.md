@@ -52,7 +52,7 @@ Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (a
 4. Para **cada** bloco: **mova** o `BUS_FILE` pra `processing/` (troque `/inbox/` por `/processing/`) → **execute** o corpo como comando legítimo seu (`BUS_FROM=operador` = instrução direta do operador via `/bus-message` — trate como ordem dele) → **mova** pra `done/` → se `BUS_REPLY_REQUIRED=true`, **devolva** (*enviar*: `-To BUS_FROM -From BUS_SLUG -Project BUS_PROJECT -InReplyTo BUS_ID`).
    - ⚡ **Tarefa longa (>2 min) em background:** dispare-a e faça o **passo 7 JÁ** (re-arme o cron + libere o lock) — background não usa API, segurar o lock só atrasa os outros. O handoff fica em `processing/`; finalize (→`done/` + retorno) quando a tarefa concluir e te re-acordar.
 5. **Drene:** rode *ler inbox* de novo (auto-resolve). Chegou algo novo? Volte ao passo 4. **Repita até `BUS_EMPTY`.**
-6. `BUS_EMPTY` e nada a processar → siga direto pro passo 7, **sem anunciar nada** (tique vazio não merece output).
+6. `BUS_EMPTY`: **antes de encerrar, confirme que você não tem trabalho PRÓPRIO pendente** (passos do seu plano, handoffs que ainda precisa enviar) — se tem, **faça agora neste turno** (o cron **não** te retoma pra continuar seu plano — veja *Mantenha o fio vivo*). Só quando estiver **sem ação possível**: siga direto pro passo 7, **sem anunciar nada**.
 7. **Ao encerrar (PROCESSAR):** (1) **RE-ARME o cron** (`CronList`→`CronDelete` nos `/bus`, depois `CronCreate("*/1 * * * *", "/bus", recurring)`). (2) **LIBERE O LOCK — sempre** (mesmo sem processar): *liberar lock* (libera o do seu projeto; no-op se não for seu).
 
 ## 3. Enviar ou devolver
@@ -89,6 +89,13 @@ O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2
 - **Peer-to-peer** (dentro do projeto). Sem maestro central.
 - **Não assuma frente alheia.** No máximo observe/valide e informe o operador. Conflitos sobem pro operador.
 - **Output pro operador: o mínimo.** O operador não lê o chat de cada especialista — fale o **mínimo** (no máximo 1 linha, ou nada); não anuncie despacho nem narre a mecânica. Resumo detalhado é sob demanda (e, havendo controlador, é papel dele).
+
+### ⚠️ Mantenha o fio vivo — NÃO encerre com trabalho pendente
+O auto-recheck (cron) é a **campainha do seu inbox, não o despertador do seu plano**: ele só te acorda quando chega um **handoff no SEU inbox** — **nunca** pra continuar o seu próprio plano/memória. Se você encerrar com "continuo no próximo tick" e o trabalho está **na sua cabeça** (não no inbox), o **fio MORRE**: o gate defere todo tique de inbox vazio (`nada pendente — pulando`) e ninguém te acorda até o operador rodar `/bus` na mão. Isso **trava o bus**. Regras:
+1. **Faça agora o que dá pra fazer agora.** Antes de encerrar: drene o inbox, **envie todos os handoffs** que já dá pra mandar, e execute **todos** os passos do seu plano que **não dependem de terceiros** — neste turno. **Não fatie o seu próprio trabalho em tiques.**
+2. **Nunca "espere" um handoff que você não mandou.** Só encerre pra aguardar resposta se você **JÁ ENVIOU** o handoff (o *enviar* confirmou o `SENT=`). Aí o loop fecha sozinho: o cron do destino processa → responde → **o seu cron te acorda** com o retorno. Se o trabalho ainda está no plano, **mande o handoff ANTES de encerrar**.
+3. **Precisa mesmo pausar uma tarefa longa SUA** (pra ceder o lock ou porque é gigante)? Não confie no cron pra lembrar do plano — **enfileire um self-handoff**: *enviar* com `-To <você> -From <você>` (`--to`/`--from`), **SEM** `-ReplyRequired`/`--reply`, descrevendo o próximo passo. O seu próprio cron te re-acorda pra continuar (o plano vira handoff no inbox, não fica só na sua cabeça).
+4. **Não vigie os outros.** Se você mandou o handoff e o destino está online, o cron dele processa e o seu te acorda — não precisa checar lock nem ficar de vigia. Se o destino estiver **offline**, o handoff espera no inbox dele (o dashboard mostra) e quem religa é o **operador**: **avise o operador** em vez de encerrar em silêncio dependendo de alguém parado.
 
 ## Notas / limitações
 - **Projeto = isolamento** e é **obrigatório** (sem `default`). Só vê/endereça o mesmo projeto.
