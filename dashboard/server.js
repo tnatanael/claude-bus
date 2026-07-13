@@ -32,7 +32,18 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];
 const DONE_MAX_AGE_SEC = 24 * 3600; // done view: hide handoffs older than 24h
 const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newest first)
-const SEEN_ARMED_MAX_SEC = 90 * 60; // chip "armado": /bus visto nos ultimos 90min (cron a cada 5 min + folga p/ jitter e sessao ocupada)
+// Frescor do seen -> cor do chip. Cron */5: um especialista saudavel tica a cada ~5min.
+// verde < 6min; amarelo 6-10min (perdeu ~1 ciclo); vermelho > 10min OU nunca visto (offline).
+// Quem SEGURA o lock (trabalhando) e promovido a verde depois (markWorking): num turno longo
+// o seen fica "velho" mas a sessao esta MAIS viva que nunca -- nao e offline.
+const SEEN_GREEN_SEC = 6 * 60;
+const SEEN_YELLOW_SEC = 10 * 60;
+function seenStatus(ageSec) {
+  if (ageSec == null) return 'red';
+  if (ageSec <= SEEN_GREEN_SEC) return 'green';
+  if (ageSec <= SEEN_YELLOW_SEC) return 'yellow';
+  return 'red';
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -230,14 +241,14 @@ function readRoster() {
     else if ((lines[0] || '').trim() !== '') { proj = 'default'; slug = lines[0].trim(); }
     else continue;
     if (!proj) proj = 'default';
-    // armed = o /bus desta sessao foi visto recentemente (seen/<sid>); como o cron
-    // dispara /bus a cada 5 min, frescor => cron realmente armado/vivo.
-    let armed = false;
+    // status do chip pela idade do seen/<sid> (verde/amarelo/vermelho). O holder do lock
+    // e promovido a verde depois (markWorking) -- trabalhando != offline.
+    let seenAgeSec = null;
     try {
       const st = fs.statSync(path.join(BUS_ROOT, 'seen', sid));
-      armed = (Math.floor(Date.now() / 1000) - Math.floor(st.mtimeMs / 1000)) <= SEEN_ARMED_MAX_SEC;
+      seenAgeSec = Math.floor(Date.now() / 1000) - Math.floor(st.mtimeMs / 1000);
     } catch (_) {}
-    (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid), armed });
+    (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid), status: seenStatus(seenAgeSec), seenAgeSec });
   }
   for (const p of Object.keys(roster)) {
     const prio = readPriorities(p === 'default' ? BUS_ROOT : path.join(BUS_ROOT, p));   // 1x por projeto
@@ -291,18 +302,24 @@ function readPriorities(root) {
 // it.toArmed = se o cron do destino esta vivo (seen fresco), it.toPrio = prioridade do
 // destino (default 1000; o front mostra badge quando != 1000).
 function attachToCron(handoffs, specs, projRoot) {
-  const armedMap = {};
-  for (const s of (specs || [])) armedMap[s.slug] = !!armedMap[s.slug] || !!s.armed;   // armado = QUALQUER sid do slug fresco (robusto a ghost+vivo coexistindo)
+  // statusMap[slug] = melhor (mais fresco) status entre os sids do slug: green > yellow > red.
+  // (robusto a ghost+vivo coexistindo: o vivo manda.)
+  const rank = { green: 3, yellow: 2, red: 1 };
+  const statusMap = {};
+  for (const s of (specs || [])) {
+    if (!(s.slug in statusMap) || (rank[s.status] || 0) > (rank[statusMap[s.slug]] || 0)) statusMap[s.slug] = s.status;
+  }
   const prio = readPriorities(projRoot);
   // toPrio (prioridade do destino) em TODOS os status -> o badge aparece certo em qualquer
   // card, nao so no inbox (antes, processing/done caiam no default 1000 no front).
   for (const status of ['inbox', 'processing', 'done', 'rejected']) {
     for (const it of (handoffs[status] || [])) it.toPrio = (it.to in prio) ? prio[it.to] : 1000;
   }
-  // tick + toArmed (eta "na fila"/"offline") so faz sentido no INBOX (itens aguardando).
+  // tick + toStatus/toArmed (eta "na fila"/"offline" + X vermelho) so faz sentido no INBOX.
   for (const it of (handoffs.inbox || [])) {
     it.tick = true;
-    it.toArmed = (it.to in armedMap) ? armedMap[it.to] : null;   // null = destino nao registrado
+    it.toStatus = (it.to in statusMap) ? statusMap[it.to] : null;      // null = destino nao registrado
+    it.toArmed = it.toStatus == null ? null : (it.toStatus !== 'red'); // compat eta: offline (X) = red
   }
 }
 
@@ -325,6 +342,12 @@ function readPaused(root) {
   try { return fs.existsSync(path.join(root, '.bus-paused')); } catch (_) { return false; }
 }
 
+// holder do lock daquele projeto = trabalhando AGORA -> status verde (sobrepoe o seen "velho"
+// de um turno longo; trabalhando e o oposto de offline). Roda ANTES do attachToCron pra o
+// destino working nao virar "offline" (X vermelho) num card do inbox.
+function markWorking(specs, holder) {
+  if (holder && holder.slug) for (const s of (specs || [])) if (s.slug === holder.slug) s.status = 'green';
+}
 function buildPayload(p) {
   p = p || 'all';
   const roster = readRoster();
@@ -332,16 +355,19 @@ function buildPayload(p) {
     const now = Math.floor(Date.now() / 1000);
     const projects = listProjects().map(name => {
       const st = buildState(projectRoot(name));
+      const holder = readLockHolder(projectRoot(name));
+      markWorking(roster[name] || [], holder);
       attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
-      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder: readLockHolder(projectRoot(name)), paused: readPaused(projectRoot(name)) };
+      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder, paused: readPaused(projectRoot(name)) };
     });
     return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean) };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
+  st.holder = readLockHolder(projectRoot(p));
+  markWorking(roster[p] || [], st.holder);
   st.specialists = roster[p] || [];
   attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
-  st.holder = readLockHolder(projectRoot(p));
   st.paused = readPaused(projectRoot(p));
   return st;
 }

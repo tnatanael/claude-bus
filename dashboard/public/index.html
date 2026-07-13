@@ -350,9 +350,13 @@
   .eta.late { color: var(--red); background: rgba(248,81,73,0.14); border-color: rgba(248,81,73,0.5); }
   .eta.waiting { background: rgba(210,153,34,0.18); border-color: rgba(210,153,34,0.6); }
   .eta.hide { display: none; }
+  .handoff.has-offline { padding-right: 34px; }
+  .dest-offline { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--red); font-size: 22px; font-weight: 800; line-height: 1; cursor: help; text-shadow: 0 0 8px rgba(248,81,73,0.55); }
   .next-check { font-family: var(--mono); font-size: 11px; color: var(--amber); background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3); border-radius: 6px; padding: 1px 8px; margin-right: 4px; cursor: help; }
-  .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-  .arm-dot.armed { background: var(--green); }
+  .arm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; background: var(--grey); }
+  .arm-dot.green { background: var(--green); }
+  .arm-dot.yellow { background: var(--amber); }
+  .arm-dot.red { background: var(--red); }
 .lockbar { flex: 0 0 auto; width: 210px; margin: 0; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: nowrap; line-height: 1.35; text-align: center; }
 .proj-title { color: var(--accent); font-weight: 700; }
 .hammer { display: inline-block; transform-origin: 75% 75%; animation: hammer-tap .55s ease-in-out infinite; }
@@ -498,17 +502,24 @@ function mockState() {
     now,
     project: "demo",
     busRoot: "/tmp/claude-bus (MOCK)",
+    holder: { slug: "backend", project: "demo", since: null, expiry: new Date(Date.now() + 20 * 60000).toISOString() },
+    specialists: [
+      { slug: "po", status: "green", prio: 0 },
+      { slug: "backend", status: "green", prio: 1000 },     // holder do lock (trabalhando) -> glow âmbar
+      { slug: "frontend", status: "yellow", prio: 1000 },   // sem tique há 6-10min
+      { slug: "architect", status: "red", prio: 1000 }      // OFFLINE -> chip vermelho + X no card destinado a ele
+    ],
     handoffs: {
       inbox: [
-        { id: "20260617-132906-f4db92", from: "po", to: "architect", replyRequired: false, inReplyTo: "20260617-132752-5bc55a" }
+        { id: "20260617-132906-f4db92", from: "po", to: "architect", replyRequired: false, inReplyTo: "20260617-132752-5bc55a", tick: true, toArmed: false, toStatus: "red", toPrio: 1000 }
       ],
       processing: [
-        { id: "20260617-132901-aa1234", from: "po", to: "backend", replyRequired: true, inReplyTo: "" }
+        { id: "20260617-132901-aa1234", from: "po", to: "backend", replyRequired: true, inReplyTo: "", toPrio: 1000 }
       ],
       done: [
-        { id: "20260617-132752-5bc55a", from: "architect", to: "po", replyRequired: true, inReplyTo: "" },
-        { id: "20260617-132218-a02fcc", from: "frontend", to: "architect", replyRequired: false, inReplyTo: "20260617-132133-d3da33" },
-        { id: "20260617-132133-d3da33", from: "architect", to: "frontend", replyRequired: true, inReplyTo: "" }
+        { id: "20260617-132752-5bc55a", from: "architect", to: "po", replyRequired: true, inReplyTo: "", toPrio: 0 },
+        { id: "20260617-132218-a02fcc", from: "frontend", to: "architect", replyRequired: false, inReplyTo: "20260617-132133-d3da33", toPrio: 1000 },
+        { id: "20260617-132133-d3da33", from: "architect", to: "frontend", replyRequired: true, inReplyTo: "", toPrio: 1000 }
       ],
       rejected: []
     },
@@ -587,14 +598,18 @@ function handoffCard(it, idSet, proj, cancelable) {
   // Eta no inbox (o server marca it.tick nos itens do inbox). data-to-armed distingue
   // "na fila" (cron do destino vivo) de "destino offline" (cron morto).
   const etaTag = it.tick ? `<span class="eta" data-to="${esc(it.to)}" data-to-armed="${it.toArmed === false ? "0" : (it.toArmed === true ? "1" : "")}" data-sent="${idToEpoch(it.id)}"></span>` : "";
+  // Destino OFFLINE (cron do destino parado, seen >10min): X vermelho grande à direita — o
+  // handoff vai ficar parado no inbox dele até voltar. Só no inbox (it.tick) e com toArmed=false.
+  const destOffline = (it.tick && it.toArmed === false);
+  const offlineX = destOffline ? `<span class="dest-offline" title="destino ${esc(it.to)} OFFLINE (sem tique há +10min) — o handoff fica parado no inbox dele até a sessão voltar; rode /bus nela">✕</span>` : "";
   // prioridade do destino (badge sempre; <1000 cede a vez, =1000 default, >1000 fura a fila)
   const tp = (it.toPrio == null ? 1000 : it.toPrio);
   const prioCls = tp < 1000 ? "low" : (tp > 1000 ? "high" : "def");
   const prioArrow = tp < 1000 ? "↓" : (tp > 1000 ? "↑" : "");
   const prioTag = `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
   return `
-    <div class="handoff${linkable}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
-      ${cancelBtn}
+    <div class="handoff${linkable}${destOffline ? " has-offline" : ""}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
+      ${cancelBtn}${offlineX}
       <div class="route">
         <span class="from">${esc(it.from)}</span>
         <span class="ar">→</span>
@@ -608,30 +623,32 @@ function handoffCard(it, idSet, proj, cancelable) {
 // Chips dos especialistas registrados num projeto (do roster names/).
 function specsHtml(specs) {
   if (!specs || !specs.length) return '<span class="specs-empty">nenhum especialista registrado</span>';
-  const armedOf = s => (s && typeof s === "object") ? !!s.armed : false;
+  const statusOf = s => (s && typeof s === "object" && s.status) ? s.status : "red";
   const slugOf = s => (typeof s === "string") ? s : s.slug;
   const mru = window.__lockMRU || [];
-  const rank = s => { const i = mru.indexOf(slugOf(s)); return i < 0 ? Infinity : i; };
-  // quem pegou o lock por último vai pra esquerda (ordem MRU); resto: offline esquerda, online direita
+  const rankMru = s => { const i = mru.indexOf(slugOf(s)); return i < 0 ? Infinity : i; };
+  const rankStatus = { red: 0, yellow: 1, green: 2 };   // offline/vermelho à esquerda, verde à direita
   const sorted = specs.slice().sort((a, b) => {
-    const ra = rank(a), rb = rank(b);
-    if (ra !== rb) return ra - rb;                              // MRU: índice menor = mais recente = mais à esquerda
-    if (armedOf(a) !== armedOf(b)) return armedOf(a) ? 1 : -1;  // sem histórico de lock: offline à esquerda
+    const ra = rankMru(a), rb = rankMru(b);
+    if (ra !== rb) return ra - rb;                        // MRU: quem pegou o lock por último mais à esquerda
+    const sa = rankStatus[statusOf(a)] || 0, sb = rankStatus[statusOf(b)] || 0;
+    if (sa !== sb) return sa - sb;                        // sem histórico de lock: offline à esquerda
     return slugOf(a).localeCompare(slugOf(b));
   });
+  const tips = {
+    green: "ativo — /bus ticou nos últimos 6 min (cron vivo)",
+    yellow: "atenção — sem tique há 6-10 min: pode ter perdido um ciclo do cron (jitter ou sessão ocupada)",
+    red: "OFFLINE — sem tique há mais de 10 min. A sessão pode estar fechada ou o cron parado; rode /bus nela.",
+  };
   return sorted.map(s => {
     const slug = slugOf(s);
-    const armed = armedOf(s);
-    const dotCls = armed ? "armed" : "cold";
-    const tip = armed
-      ? "cron de auto-recheck armado e ativo (rodou /bus na última ~1h)"
-      : "OFFLINE: cron não confirmado na última ~1h — a sessão pode estar fechada ou o cron parado; rode /bus nela";
+    const status = statusOf(s);
     // prioridade no chip SÓ se ≠ default (1000) — evita poluir; default fica implícito
     const pr = (s && typeof s === "object" && typeof s.prio === "number") ? s.prio : 1000;
     const prioBadge = pr !== 1000
       ? `<span class="cprio ${pr < 1000 ? "low" : "high"}" title="prioridade ${pr} (default 1000 — menor cede a vez, maior fura a fila)">${pr < 1000 ? "↓" : "↑"}${pr}</span>`
       : "";
-    return `<span class="spec-chip" data-slug="${esc(slug)}" title="${tip}"><span class="arm-dot ${dotCls}"></span>${esc(slug)}${prioBadge}</span>`;
+    return `<span class="spec-chip" data-slug="${esc(slug)}" title="${tips[status] || tips.red}"><span class="arm-dot ${status}"></span>${esc(slug)}${prioBadge}</span>`;
   }).join("");
 }
 
@@ -688,7 +705,7 @@ function highlightHolderChip() {
   document.querySelectorAll(".spec-chip").forEach(c =>
     c.classList.toggle("working", set.has(c.getAttribute("data-slug"))));
 }
-const LOCK_TIP = '<span class="lk-info" tabindex="0">!<span class="lk-tip"><b>Lock de concorrência (por projeto)</b><br>Cada projeto tem <b>1 lock próprio</b>: só <b>1 especialista trabalha por vez dentro do projeto</b>, mas <b>projetos diferentes rodam em paralelo</b>. Quem pega um handoff segura o lock do seu projeto; os demais <code>/bus</code> do <b>mesmo</b> projeto deferem <b>sem gastar API</b> (bloqueados pelo hook antes de acordar o modelo) e tentam de novo no próximo tique (~1 min). Se a sessão que segura cair, o lock <b>expira sozinho</b> pelo lease.</span></span>';
+const LOCK_TIP = '<span class="lk-info" tabindex="0">!<span class="lk-tip"><b>Lock de concorrência (por projeto)</b><br>Cada projeto tem <b>1 lock próprio</b>: só <b>1 especialista trabalha por vez dentro do projeto</b>, mas <b>projetos diferentes rodam em paralelo</b>. Quem pega um handoff segura o lock do seu projeto; os demais <code>/bus</code> do <b>mesmo</b> projeto deferem <b>sem gastar API</b> (bloqueados pelo hook antes de acordar o modelo) e tentam de novo no próximo tique (~5 min). Se a sessão que segura cair, o lock <b>expira sozinho</b> pelo lease.</span></span>';
 
 // Atualiza o MRU: novo dono do lock vai pro topo (esquerda), mantendo a ordem atras dele.
 function noteHolderMRU(holder) {
