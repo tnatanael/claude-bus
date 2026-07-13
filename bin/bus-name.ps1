@@ -27,7 +27,7 @@ $f = Join-Path $dir ($sid + '.txt')
 
 # "visto por ultimo": TODA passada do /bus chama o bus-name -> regrava este marcador.
 # O dashboard usa o frescor dele pra inferir se o cron da sessao esta REALMENTE armado
-# (o cron dispara /bus de hora em hora, e todo /bus re-arma o cron e passa por aqui).
+# (o cron dispara /bus a cada 5 min, e todo /bus re-arma o cron e passa por aqui).
 $seenDir = Join-Path $BusRoot 'seen'
 New-Item -ItemType Directory -Force -Path $seenDir | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $seenDir $sid), (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))

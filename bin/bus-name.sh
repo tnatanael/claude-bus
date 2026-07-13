@@ -13,7 +13,7 @@ dir="$bus_root/names"; mkdir -p "$dir"
 f="$dir/$sid.txt"
 
 # "visto por ultimo": todo /bus passa por aqui -> regrava. O dashboard usa o frescor
-# pra inferir se o cron da sessao esta REALMENTE armado (cron dispara /bus de hora em hora).
+# pra inferir se o cron da sessao esta REALMENTE armado (cron dispara /bus a cada 5 min).
 seen_dir="$bus_root/seen"; mkdir -p "$seen_dir"
 date +%s > "$seen_dir/$sid"
 

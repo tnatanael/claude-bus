@@ -47,7 +47,7 @@ if ($BusRoot -eq '') {
 }
 
 # Marcador "visto por ultimo" na BASE (global): mantem o "armado" do dashboard fresco a
-# cada /bus (mesmo quando a IA pula o bus-name). O cron dispara /bus a cada 1 min.
+# cada /bus (mesmo quando a IA pula o bus-name). O cron dispara /bus a cada 5 min.
 if ($sid) {
   $seenDir = Join-Path $base 'seen'
   New-Item -ItemType Directory -Force -Path $seenDir | Out-Null

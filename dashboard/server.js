@@ -32,7 +32,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];
 const DONE_MAX_AGE_SEC = 24 * 3600; // done view: hide handoffs older than 24h
 const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newest first)
-const SEEN_ARMED_MAX_SEC = 90 * 60; // chip "armado": /bus visto nos ultimos 90min (cron horario + folga p/ jitter e sessao ocupada)
+const SEEN_ARMED_MAX_SEC = 90 * 60; // chip "armado": /bus visto nos ultimos 90min (cron a cada 5 min + folga p/ jitter e sessao ocupada)
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -231,7 +231,7 @@ function readRoster() {
     else continue;
     if (!proj) proj = 'default';
     // armed = o /bus desta sessao foi visto recentemente (seen/<sid>); como o cron
-    // dispara /bus de hora em hora, frescor => cron realmente armado/vivo.
+    // dispara /bus a cada 5 min, frescor => cron realmente armado/vivo.
     let armed = false;
     try {
       const st = fs.statSync(path.join(BUS_ROOT, 'seen', sid));

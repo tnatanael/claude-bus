@@ -17,6 +17,6 @@ description: Re-arma SÓ o cron de auto-recheck do BUS desta sessão — NÃO pr
 
 2. **Re-arme o cron DO ZERO.** `CronList`/`CronCreate`/`CronDelete` são **deferidas**: rode `ToolSearch select:CronList,CronCreate,CronDelete` ANTES.
    - **DESARMAR:** `CronList` → `CronDelete` em **CADA** job com prompt começando em `/bus` (limpa phantom/duplicado — pós-restart o `CronList` pode listar um cron morto que **não dispara**; re-arme sempre do zero).
-   - **ARMAR:** `CronCreate(cron: "*/1 * * * *", prompt: "/bus", recurring: true)` — **UM** cron, a cada 1 min, prompt **bare `/bus`** (SEM slug/projeto). ⚠️ Só `*/N` ou valor único disparam — vírgula/`M/30` o harness aceita mas **NÃO dispara**.
+   - **ARMAR:** `CronCreate(cron: "*/5 * * * *", prompt: "/bus", recurring: true)` — **UM** cron, a cada 5 min, prompt **bare `/bus`** (SEM slug/projeto). ⚠️ Só `*/N` ou valor único disparam — vírgula/`M/30` o harness aceita mas **NÃO dispara**.
 
-3. **NÃO** processe o inbox e **NÃO** libere lock. Reporte **"cron re-armado — slug=X, projeto=Y"**. O auto-recheck (bare `/bus` a cada 1 min) volta a rodar e o dashboard mostra o especialista armado.
+3. **NÃO** processe o inbox e **NÃO** libere lock. Reporte **"cron re-armado — slug=X, projeto=Y"**. O auto-recheck (bare `/bus` a cada 5 min) volta a rodar e o dashboard mostra o especialista armado.
