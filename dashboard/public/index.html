@@ -929,6 +929,9 @@ function projLabel(p) {
   return String(p || "").replace(/[-_\s]+/g, " ").trim().toUpperCase();
 }
 function setProjTitle(state) {
+  // Titulo da ABA dinamico: "BUS · PETADATA" -> facil de achar entre varias abas.
+  const proj = (state && state.all) ? "TODOS" : ((state && state.project) ? projLabel(state.project) : "");
+  document.title = proj ? ("BUS · " + proj) : "BUS Live Dashboard";
   const el = document.getElementById("projTitle");
   if (!el) return;
   if (!state || (!state.project && !state.all)) { el.textContent = ""; return; }
@@ -961,8 +964,8 @@ function render(state) {
     all.style.display = "";
     setBusRoot("(todos os projetos)");
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
-      [p.project, p.specialists || [], ["inbox","processing","done","rejected"].map(k =>
-        (k === "inbox" ? sortInboxByWait(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id).join(","))]));
+      [p.project, (p.specialists || []).map(s => s.slug + ":" + s.status + ":" + (s.prio == null ? 1000 : s.prio)), ["inbox","processing","done","rejected"].map(k =>
+        (k === "inbox" ? sortInboxByWait(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id + "|" + (it.toStatus || "")).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     updateEtas();
     renderHolders(state.holders);
@@ -981,7 +984,7 @@ function render(state) {
   // a ORDEM (prioridade + espera) entra na assinatura -> re-ordena se a prioridade mudar.
   const inboxOrder = sortInboxByWait(h.inbox || []).map(it => it.id).join(",");
   const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
-    (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}`)));
+    (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}|${it.toStatus || ""}|${it.toPrio == null ? "" : it.toPrio}`)));
   if (sig !== lastHandoffSig) {
     lastHandoffSig = sig;
     renderHandoffs(h, state.project);
