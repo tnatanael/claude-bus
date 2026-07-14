@@ -65,6 +65,8 @@
   #projectSel:hover { background: rgba(88,166,255,.24); }
   #projectSel option { background: var(--panel-2); color: var(--text); font-weight: 600; }
   .proj-controls { display: inline-flex; align-items: center; gap: 8px; }
+  .proj-cycle { background: rgba(88,166,255,.14); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 10px; font-size: 14px; font-weight: 700; cursor: pointer; line-height: 1; }
+  .proj-cycle:hover { background: rgba(88,166,255,.28); }
   .proj-edit { margin-left: 7px; padding: 1px 6px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; vertical-align: middle; line-height: 1; }
   .proj-edit:hover { background: rgba(255,255,255,.08); color: var(--text); }
   #busRoot { cursor: pointer; white-space: nowrap; }
@@ -402,8 +404,8 @@
 </head>
 <body>
 <header>
-  <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco — o dashboard nunca escreve nos handoffs (só o botão Pausar toca o marcador de pausa). Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span><span class="proj-title" id="projTitle"></span><button id="projEdit" class="proj-edit" title="Trocar projeto" style="display:none">✏️</button></h1>
-  <span class="proj-controls"><select id="projectSel" style="display:none"><option value="">— selecione —</option></select><button id="pauseBtn" class="pausebtn" style="display:none"></button></span>
+  <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco — o dashboard nunca escreve nos handoffs (só o botão Pausar toca o marcador de pausa). Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span></h1>
+  <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button></span>
   <div class="meta">
     <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
     <span>bus root: <b id="busRoot">…</b></span>
@@ -1043,51 +1045,43 @@ window.addEventListener("resize", () => {
 });
 
 // popula o seletor de projetos; ao trocar, religa o tick no projeto escolhido
+let allProjects = [];   // lista atual de projetos (pro botao de ciclo + syncProjUI)
 async function loadProjects() {
   try {
     const r = await fetch("/api/projects", { cache: "no-store" });
     if (!r.ok) return;
     const data = await r.json();
+    allProjects = data.projects || [];
     const sel = document.getElementById("projectSel");
     const cur = selectedProject;
     sel.innerHTML = '<option value="">— selecione —</option>' +
-      (data.projects || []).map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+      allProjects.map(p => `<option value="${esc(p)}">${esc(projLabel(p))}</option>`).join("");   // texto em MAIUSCULAS; value = slug cru
     sel.value = cur;
     if (sel.value !== cur) { selectedProject = ""; sel.value = ""; }   // projeto salvo/URL nao existe mais -> exige nova escolha
     persistProject(selectedProject);   // carimba ?project=... na URL -> aba fica independente e F5-safe desde o load
     syncProjUI();
   } catch (_) {}
 }
-let editingProject = false;
-// Por padrao o seletor fica OCULTO quando ja ha projeto (mostra o nome + lapis). O lapis
-// revela o seletor; escolher um projeto (ou clicar fora) fecha de novo. Sem projeto -> seletor visivel.
+// O seletor fica SEMPRE visivel (ele proprio e o "nome" do projeto, em maiusculas). O botao de
+// ciclo (proximo projeto, 1 clique com wrap) so aparece com 2+ projetos.
 function syncProjUI() {
-  const sel = document.getElementById("projectSel");
-  const edit = document.getElementById("projEdit");
-  const title = document.getElementById("projTitle");
-  if (!sel || !edit || !title) return;
-  const hasProj = !!selectedProject;
-  const showSel = !hasProj || editingProject;
-  sel.style.display = showSel ? "" : "none";
-  edit.style.display = (hasProj && !editingProject) ? "" : "none";
-  title.style.display = (hasProj && !editingProject) ? "" : "none";
+  const cyc = document.getElementById("projCycle");
+  if (cyc) cyc.style.display = (allProjects.length >= 2) ? "" : "none";
 }
-document.getElementById("projectSel").addEventListener("change", e => {
-  selectedProject = e.target.value || "";
-  editingProject = false;
+function switchProject(p) {
+  selectedProject = p || "";
+  const sel = document.getElementById("projectSel"); if (sel) sel.value = selectedProject;
   persistProject(selectedProject);   // URL (?project=...) por aba + localStorage como fallback
-  lastHandoffSig = "";   // força re-render ao trocar de projeto
+  lastHandoffSig = "";               // forca re-render ao trocar de projeto
   syncProjUI();
   tick();
-});
-document.getElementById("projectSel").addEventListener("blur", () => {
-  // clicar fora fecha a edicao (deixa o change processar antes); so se ja houver projeto
-  setTimeout(() => { if (selectedProject) { editingProject = false; syncProjUI(); } }, 150);
-});
-document.getElementById("projEdit").addEventListener("click", () => {
-  editingProject = true;
-  syncProjUI();
-  document.getElementById("projectSel").focus();
+}
+document.getElementById("projectSel").addEventListener("change", e => switchProject(e.target.value));
+// Botao "proximo projeto": avanca 1 na lista, com wrap (se estiver no fim, volta pro comeco).
+document.getElementById("projCycle").addEventListener("click", () => {
+  if (!allProjects.length) return;
+  const i = allProjects.indexOf(selectedProject);
+  switchProject(allProjects[(i + 1) % allProjects.length]);   // i=-1 (nenhum selecionado) -> vai pro primeiro
 });
 // Botao Pausar/Retomar -> liga/desliga a pausa do projeto selecionado (POST /api/pause).
 document.getElementById("pauseBtn").addEventListener("click", async (e) => {
