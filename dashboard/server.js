@@ -220,15 +220,7 @@ function projectRoot(p) {
 
 const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names', 'presence', 'state', 'seen']);
 
-// Minuto do cron de uma sessao = soma dos bytes do sid mod 60 (mesmo calculo do
-// bus-name), pro countdown do dashboard bater com o minuto realmente armado.
-function cronMinuteForSid(sid) {
-  let s = 0;
-  for (let i = 0; i < sid.length; i++) s += sid.charCodeAt(i);
-  return s % 60;
-}
-
-// names/<sid>.txt = 2 linhas (projeto, slug). Roster: projeto -> [{slug, cron}].
+// names/<sid>.txt = 2 linhas (projeto, slug). Roster: projeto -> [{slug, status, seenAgeSec, prio}].
 // (compat: arquivo de 1 linha = projeto 'default'.)
 function readRoster() {
   const roster = {};
@@ -248,7 +240,7 @@ function readRoster() {
       const st = fs.statSync(path.join(BUS_ROOT, 'seen', sid));
       seenAgeSec = Math.floor(Date.now() / 1000) - Math.floor(st.mtimeMs / 1000);
     } catch (_) {}
-    (roster[proj] = roster[proj] || []).push({ slug, cron: cronMinuteForSid(sid), status: seenStatus(seenAgeSec), seenAgeSec });
+    (roster[proj] = roster[proj] || []).push({ slug, status: seenStatus(seenAgeSec), seenAgeSec });
   }
   for (const p of Object.keys(roster)) {
     const prio = readPriorities(p === 'default' ? BUS_ROOT : path.join(BUS_ROOT, p));   // 1x por projeto

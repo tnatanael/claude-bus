@@ -1,6 +1,6 @@
 {
   "name": "bus",
-  "version": "0.6.38",
+  "version": "0.6.39",
   "description": "Handoffs assincronos entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO (OBRIGATORIO): /bus <slug> <projeto> CONFIGURA a sessao (identidade/prioridade/auto-recheck), /bus bare (ou o cron) PROCESSA o inbox; projetos isolados; auth por token; auto-nome por sessao; auto-recheck a cada 1min (cron */1 bare) re-armavel com /bus-reload; gate de concorrencia PRE-API (hook UserPromptSubmit) com LOCK POR PROJETO (projetos diferentes rodam em paralelo); /bus-message enfileira instrucao do operador SEM acordar o modelo; pausa por projeto; prioridade/controlador; dashboard por projeto (pausar/retomar). Cross-platform (Windows PowerShell / macOS + Linux bash).",
   "author": { "name": "tnatanael" },
   "homepage": "https://github.com/tnatanael/claude-bus",

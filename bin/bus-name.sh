@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bus-name.sh [slug] [project] [priority]   (par Unix do bus-name.ps1)
-# Sem args: ecoa o registrado (PROJECT=/SLUG=/BUS_CRON_MINUTE=) ou 'NONE'.
+# Sem args: ecoa o registrado (PROJECT=/SLUG=) ou 'NONE'.
 # Com args: grava (projeto OBRIGATORIO; faltando ou 'default' -> NEED_PROJECT) e ecoa. [priority] (>=0) faz upsert de
 # "slug:N" no <projroot>/.priority (prioridade do gate; default 1000; menor cede mais).
 # Compat: 1 linha antiga = projeto 'default'.
@@ -17,12 +17,7 @@ f="$dir/$sid.txt"
 seen_dir="$bus_root/seen"; mkdir -p "$seen_dir"
 date +%s > "$seen_dir/$sid"
 
-# minuto do cron DETERMINISTICO por sessao = soma dos bytes do sid mod 60 (bate com
-# o dashboard, que calcula do sid). Estavel entre chamadas; ainda espalha as sessoes.
-cronmin=0; i=0
-while [ "$i" -lt "${#sid}" ]; do c=$(printf '%d' "'${sid:$i:1}"); cronmin=$((cronmin + c)); i=$((i + 1)); done
-cronmin=$((cronmin % 60))
-emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_MINUTE=$cronmin"; }
+emit() { echo "PROJECT=$1"; echo "SLUG=$2"; }
 
 if [ -n "${1:-}" ]; then
   proj="${2:-}"

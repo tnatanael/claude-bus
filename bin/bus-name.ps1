@@ -6,7 +6,6 @@
 # Saida (quando registrado):
 #   PROJECT=<projeto>
 #   SLUG=<slug>
-#   BUS_CRON_MINUTE=<0-59>   (minuto aleatorio pro cron de auto-recheck; so usado no 1o arm)
 # Compat: arquivo antigo de 1 linha (so slug) e lido como projeto 'default'.
 # names/ fica SEMPRE na raiz BASE (registro global de quem e quem); o isolamento por
 # projeto acontece nas pastas de handoff (inbox/processing/done/rejected por projeto).
@@ -32,17 +31,9 @@ $seenDir = Join-Path $BusRoot 'seen'
 New-Item -ItemType Directory -Force -Path $seenDir | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $seenDir $sid), (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))
 
-# Minuto do cron DETERMINISTICO por sessao = soma dos bytes do sid mod 60. Estavel
-# entre chamadas E identico ao que o dashboard calcula do sid -- assim o countdown
-# bate com o minuto realmente armado no cron. (Ainda espalha as sessoes pela hora.)
-$cronMin = 0
-foreach ($ch in $sid.ToCharArray()) { $cronMin += [int][char]$ch }
-$cronMin = $cronMin % 60
-
 function Emit([string]$proj, [string]$slug) {
   Write-Output ('PROJECT=' + $proj)
   Write-Output ('SLUG=' + $slug)
-  Write-Output ('BUS_CRON_MINUTE=' + $cronMin)
 }
 
 if ($Set -ne '') {

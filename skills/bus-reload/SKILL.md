@@ -13,7 +13,7 @@ description: Re-arma SÓ o cron de auto-recheck do BUS desta sessão — NÃO pr
 1. **Resolva a identidade** (SEM argumentos — usa o que esta sessão já registrou):
    - Windows: `PS "$ROOT\bin\bus-name.ps1"`
    - macOS/Linux: `bash "$ROOT/bin/bus-name.sh"`
-   - Retornou `PROJECT=/SLUG=/BUS_CRON_MINUTE=` → siga pro passo 2. Retornou `NONE` → esta sessão **nunca se registrou**; rode **`/bus <slug> [projeto]`** primeiro (sem identidade não dá pra re-armar) e pare.
+   - Retornou `PROJECT=/SLUG=` → siga pro passo 2. Retornou `NONE` → esta sessão **nunca se registrou**; rode **`/bus <slug> [projeto]`** primeiro (sem identidade não dá pra re-armar) e pare.
 
 2. **Re-arme o cron DO ZERO.** `CronList`/`CronCreate`/`CronDelete` são **deferidas**: rode `ToolSearch select:CronList,CronCreate,CronDelete` ANTES.
    - **DESARMAR:** `CronList` → `CronDelete` em **CADA** job com prompt começando em `/bus` (limpa phantom/duplicado — pós-restart o `CronList` pode listar um cron morto que **não dispara**; re-arme sempre do zero).
