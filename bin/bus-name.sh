@@ -17,7 +17,11 @@ f="$dir/$sid.txt"
 seen_dir="$bus_root/seen"; mkdir -p "$seen_dir"
 date +%s > "$seen_dir/$sid"
 
-emit() { echo "PROJECT=$1"; echo "SLUG=$2"; }
+# Intervalo do cron (GLOBAL, config do dashboard em <base>/.bus-cron-interval). Default 5, clamp [1,30].
+cron_interval=5
+civ="$(cat "$bus_root/.bus-cron-interval" 2>/dev/null | tr -dc '0-9')"
+[ -n "$civ" ] && [ "$civ" -ge 1 ] 2>/dev/null && [ "$civ" -le 30 ] 2>/dev/null && cron_interval="$civ"
+emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_INTERVAL=$cron_interval"; }
 
 if [ -n "${1:-}" ]; then
   proj="${2:-}"

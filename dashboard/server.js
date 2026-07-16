@@ -334,6 +334,18 @@ function readPaused(root) {
   try { return fs.existsSync(path.join(root, '.bus-paused')); } catch (_) { return false; }
 }
 
+// Intervalo do cron de auto-recheck (GLOBAL, marcador <base>/.bus-cron-interval, minutos).
+// Configuravel pelo dashboard; os especialistas leem via bus-name/bus-inbox e armam */N no
+// PROXIMO arm (nao e instantaneo -- converge em ~1 ciclo). Default 5, clamp [1,30].
+const CRON_INTERVAL_DEFAULT = 5;
+function readCronInterval() {
+  try {
+    const n = parseInt((safeReadText(path.join(BUS_ROOT, '.bus-cron-interval')) || '').trim(), 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 30) return n;
+  } catch (_) {}
+  return CRON_INTERVAL_DEFAULT;
+}
+
 // holder do lock daquele projeto = trabalhando AGORA -> status verde (sobrepoe o seen "velho"
 // de um turno longo; trabalhando e o oposto de offline). Roda ANTES do attachToCron pra o
 // destino working nao virar "offline" (X vermelho) num card do inbox.
@@ -352,7 +364,7 @@ function buildPayload(p) {
       attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
       return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder, paused: readPaused(projectRoot(name)) };
     });
-    return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean) };
+    return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean), cronInterval: readCronInterval() };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
@@ -361,6 +373,7 @@ function buildPayload(p) {
   st.specialists = roster[p] || [];
   attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
   st.paused = readPaused(projectRoot(p));
+  st.cronInterval = readCronInterval();
   return st;
 }
 
@@ -547,6 +560,29 @@ const server = http.createServer((req, res) => {
           }
         }
         sendJson(res, { ok: !!deleted, id, deleted });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
+    return;
+  }
+
+  // Config do intervalo do cron de auto-recheck (GLOBAL, minutos). O dashboard grava; os
+  // especialistas leem via bus-name/bus-inbox e re-armam */N no proximo /bus (nao instantaneo).
+  if (req.method === 'POST' && urlPath === '/api/cron-interval') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const n = parseInt(JSON.parse(body || '{}').minutes, 10);
+        if (!Number.isFinite(n) || n < 1 || n > 30) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'minutes must be an integer 1-30' }));
+          return;
+        }
+        fs.writeFileSync(path.join(BUS_ROOT, '.bus-cron-interval'), String(n));
+        sendJson(res, { cronInterval: n });
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String(e) }));

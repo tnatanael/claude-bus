@@ -23,6 +23,12 @@ $base = $env:CLAUDE_BUS_ROOT
 if (-not $base) { $base = Join-Path $env:TEMP 'claude-bus' }
 $sid = $env:CLAUDE_CODE_SESSION_ID
 
+# Intervalo do cron (GLOBAL, config do dashboard em <base>/.bus-cron-interval). Default 5,
+# clamp [1,30]. O modelo re-arma "*/<esse N> * * * *" no passo 7 -- e o unico numero do cron.
+$cronInterval = 5
+try { $civ = 0; if ([int]::TryParse((Get-Content -LiteralPath (Join-Path $base '.bus-cron-interval') -Raw -ErrorAction Stop).Trim(), [ref]$civ) -and $civ -ge 1 -and $civ -le 30) { $cronInterval = $civ } } catch {}
+Write-Output ('BUS_CRON_INTERVAL=' + $cronInterval)
+
 # IDENTIDADE AUTO-RESOLVIDA: se -Me nao veio, le o registro global names/<sid>
 # (linha1=projeto, linha2=slug) -- igual o gate faz -- e ANUNCIA na saida. Assim o
 # /bus bare nao precisa de uma chamada separada ao bus-name so pra saber quem e.

@@ -61,6 +61,10 @@
     flex-wrap: wrap;
   }
   .meta b { color: var(--text); font-weight: 600; }
+  .cron-cfg { display: inline-flex; align-items: center; gap: 3px; }
+  .cron-step { width: 18px; height: 18px; padding: 0; line-height: 1; border-radius: 5px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; }
+  .cron-step:hover { border-color: var(--accent); background: rgba(88,166,255,.14); }
+  #cronVal { color: var(--text); font-weight: 700; min-width: 11px; text-align: center; display: inline-block; }
   #projectSel { background: rgba(88,166,255,.14); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 9px; font-size: 13px; font-weight: 700; cursor: pointer; outline: none; }
   #projectSel:hover { background: rgba(88,166,255,.24); }
   #projectSel option { background: var(--panel-2); color: var(--text); font-weight: 600; }
@@ -408,6 +412,7 @@
   <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button></span>
   <div class="meta">
     <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
+    <span class="cron-cfg" title="Intervalo do auto-recheck (cron */N min, 1–30). Grava no BUS; cada especialista pega no próximo /bus (~1 ciclo, não é instantâneo).">check: <button class="cron-step" id="cronDec" type="button">−</button><b id="cronVal">5</b>m<button class="cron-step" id="cronInc" type="button">+</button></span>
     <span>bus root: <b id="busRoot">…</b></span>
     <span>now: <b id="now">…</b></span>
     <span class="src" id="src">…</span>
@@ -665,7 +670,8 @@ function sortInboxByWait(items) {
 //  - "⏱ ~Nm": countdown ate o proximo tique (ainda nao passou por nenhum);
 //  - "⏳ N na fila": ja passou por N tiques sem ser pego -> lock estava ocupado (NORMAL);
 //  - "⚠ destino offline": o cron do destino nem esta disparando (seen velho = nao armado).
-const TICK_MS = 5 * 60 * 1000;
+let cronInterval = 5;             // intervalo do cron (min) — sincronizado do state.cronInterval
+let TICK_MS = cronInterval * 60 * 1000;
 function updateEtas() {
   const nowMs = Date.now();
   const nextTick = Math.ceil((nowMs + 1) / TICK_MS) * TICK_MS;     // proximo multiplo de 5 min
@@ -953,6 +959,7 @@ function renderPause(state) {
 
 function render(state) {
   document.getElementById("now").textContent = fmtClock(state.now);
+  syncCronInterval(state.cronInterval);
   noteHolderMRU(state.holder);   // atualiza o MRU antes de desenhar os chips
   renderPause(state);
   setProjTitle(state);
@@ -1083,6 +1090,21 @@ document.getElementById("projCycle").addEventListener("click", () => {
   const i = allProjects.indexOf(selectedProject);
   switchProject(allProjects[(i + 1) % allProjects.length]);   // i=-1 (nenhum selecionado) -> vai pro primeiro
 });
+// Intervalo do cron ("check"): sincroniza do state a cada render; +/- grava via POST /api/cron-interval.
+function syncCronInterval(n) {
+  if (typeof n !== "number" || n < 1 || n > 30) return;
+  cronInterval = n;
+  TICK_MS = n * 60 * 1000;
+  const v = document.getElementById("cronVal"); if (v) v.textContent = n;
+}
+async function setCronInterval(n) {
+  n = Math.max(1, Math.min(30, Math.round(n)));
+  syncCronInterval(n);   // otimista -- o proximo render re-sincroniza do server
+  try { await fetch("/api/cron-interval", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minutes: n }) }); } catch (_) {}
+  tick();
+}
+document.getElementById("cronDec").addEventListener("click", () => setCronInterval(cronInterval - 1));
+document.getElementById("cronInc").addEventListener("click", () => setCronInterval(cronInterval + 1));
 // Botao Pausar/Retomar -> liga/desliga a pausa do projeto selecionado (POST /api/pause).
 document.getElementById("pauseBtn").addEventListener("click", async (e) => {
   const btn = e.currentTarget;

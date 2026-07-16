@@ -18,6 +18,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Intervalo do cron (GLOBAL, config do dashboard em <base>/.bus-cron-interval). Default 5, clamp [1,30].
+cron_interval=5
+civ="$(cat "$base/.bus-cron-interval" 2>/dev/null | tr -dc '0-9')"
+[ -n "$civ" ] && [ "$civ" -ge 1 ] 2>/dev/null && [ "$civ" -le 30 ] 2>/dev/null && cron_interval="$civ"
+echo "BUS_CRON_INTERVAL=$cron_interval"
+
 # IDENTIDADE AUTO-RESOLVIDA: sem --me, le names/<sid> (linha1=projeto, linha2=slug) e ANUNCIA.
 if [ -z "$me" ]; then
   if [ -n "$sid" ] && [ -f "$base/names/$sid.txt" ]; then

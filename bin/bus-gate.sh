@@ -120,7 +120,7 @@ main() {
   mroot="$projroot"
   for d in inbox processing done rejected; do [ -d "$mroot/$d" ] || mkdir -p "$mroot/$d" 2>/dev/null; done
   mcut=$(( now - 6*3600 ))
-  for mp in "$mroot/.bus-secret" "$mroot/.priority" "$mroot/.bus-paused" "$namefile" "$mroot/inbox" "$mroot/processing" "$mroot/done" "$mroot/rejected"; do
+  for mp in "$mroot/.bus-secret" "$mroot/.priority" "$mroot/.bus-paused" "$base/.bus-cron-interval" "$namefile" "$mroot/inbox" "$mroot/processing" "$mroot/done" "$mroot/rejected"; do
     if [ -e "$mp" ]; then
       mmt=$(date -r "$mp" +%s 2>/dev/null || stat -c %Y "$mp" 2>/dev/null || echo 0)
       [ "$mmt" -lt "$mcut" ] 2>/dev/null && touch "$mp" 2>/dev/null

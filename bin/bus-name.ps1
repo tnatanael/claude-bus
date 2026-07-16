@@ -14,8 +14,11 @@ param(
   [string]$Set = '',
   [string]$Project = '',
   [int]$Priority = -1,
-  [string]$BusRoot = (Join-Path $env:TEMP 'claude-bus')
+  [string]$BusRoot = ''
 )
+# Base: -BusRoot explicito vence; senao CLAUDE_BUS_ROOT; senao %TEMP%\claude-bus. MESMA resolucao
+# do bus-inbox/gate/server -- senao a config .bus-cron-interval (e names/seen) iria pra outro lugar.
+if ($BusRoot -eq '') { $BusRoot = $env:CLAUDE_BUS_ROOT; if (-not $BusRoot) { $BusRoot = Join-Path $env:TEMP 'claude-bus' } }
 
 $dir = Join-Path $BusRoot 'names'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -31,9 +34,15 @@ $seenDir = Join-Path $BusRoot 'seen'
 New-Item -ItemType Directory -Force -Path $seenDir | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $seenDir $sid), (Get-Date).ToString('o'), (New-Object System.Text.UTF8Encoding($false)))
 
+# Intervalo do cron de auto-recheck (GLOBAL, config do dashboard em <base>/.bus-cron-interval).
+# Default 5, clamp [1,30]. O modelo arma "*/<esse N> * * * *" -- e o unico numero do cron.
+$cronInterval = 5
+try { $civ = 0; if ([int]::TryParse((Get-Content -LiteralPath (Join-Path $BusRoot '.bus-cron-interval') -Raw -ErrorAction Stop).Trim(), [ref]$civ) -and $civ -ge 1 -and $civ -le 30) { $cronInterval = $civ } } catch {}
+
 function Emit([string]$proj, [string]$slug) {
   Write-Output ('PROJECT=' + $proj)
   Write-Output ('SLUG=' + $slug)
+  Write-Output ('BUS_CRON_INTERVAL=' + $cronInterval)
 }
 
 if ($Set -ne '') {

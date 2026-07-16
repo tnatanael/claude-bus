@@ -164,7 +164,7 @@ try {
       try { if (-not (Test-Path -LiteralPath $dp)) { New-Item -ItemType Directory -Force -Path $dp | Out-Null } } catch {}
     }
     $mCut = (Get-Date).AddHours(-6); $mNow = Get-Date
-    foreach ($mp in @((Join-Path $mRoot '.bus-secret'), (Join-Path $mRoot '.priority'), (Join-Path $mRoot '.bus-paused'), $nameFile, (Join-Path $mRoot 'inbox'), (Join-Path $mRoot 'processing'), (Join-Path $mRoot 'done'), (Join-Path $mRoot 'rejected'))) {
+    foreach ($mp in @((Join-Path $mRoot '.bus-secret'), (Join-Path $mRoot '.priority'), (Join-Path $mRoot '.bus-paused'), (Join-Path $base '.bus-cron-interval'), $nameFile, (Join-Path $mRoot 'inbox'), (Join-Path $mRoot 'processing'), (Join-Path $mRoot 'done'), (Join-Path $mRoot 'rejected'))) {
       try { $mi = Get-Item -LiteralPath $mp -ErrorAction SilentlyContinue; if ($mi -and $mi.LastWriteTime -lt $mCut) { $mi.LastWriteTime = $mNow } } catch {}
     }
   } catch {}
