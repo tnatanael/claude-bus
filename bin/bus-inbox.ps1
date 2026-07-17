@@ -116,3 +116,12 @@ foreach ($hit in $hits) {
   Write-Output 'BUS_BODY_END'
 }
 if ($found -eq 0) { Write-Output 'BUS_EMPTY' }
+# INBOX GERAL do projeto: destinos distintos com handoff pendente (o "olhar o inbox geral, nao
+# so o seu"). So o nome do arquivo (escrita e atomica -> .handoff = completo), barato. VAZIO =
+# bus parado: se voce termina esperando resposta e isto esta vazio, o retorno NAO vem sozinho
+# (ninguem te acorda) -> peca o status a quem voce espera (doutrina "fio vivo" da skill).
+$pend = @{}
+foreach ($h in (Get-ChildItem -LiteralPath $inbox -File -Filter 'to-*.handoff' -ErrorAction SilentlyContinue)) {
+  if ($h.Name -match '^to-(.+?)__') { $pend[$matches[1]] = $true }
+}
+Write-Output ('BUS_PENDING=' + (($pend.Keys | Sort-Object) -join ','))

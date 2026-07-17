@@ -93,4 +93,14 @@ for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   echo "BUS_BODY_END"
 done
 [ "$found" -eq 0 ] && echo "BUS_EMPTY"
+# INBOX GERAL do projeto: destinos distintos com handoff pendente (o "olhar o inbox geral, nao
+# so o seu"). So o nome do arquivo (escrita atomica). VAZIO = bus parado: se voce termina
+# esperando resposta e isto esta vazio, o retorno NAO vem sozinho -> peca o status ("fio vivo").
+pend=""
+for f in "$inbox"/to-*.handoff; do
+  [ -e "$f" ] || continue
+  bn="$(basename "$f")"; d="${bn#to-}"; d="${d%%__*}"
+  case ",$pend," in *",$d,"*) ;; *) pend="${pend:+$pend,}$d";; esac
+done
+echo "BUS_PENDING=$pend"
 exit 0

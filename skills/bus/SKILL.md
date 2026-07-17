@@ -49,12 +49,13 @@ Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (a
    BUS_BODY_BEGIN
    <corpo, já limpo — sem header nem marcadores>
    BUS_BODY_END
+   BUS_PENDING=<destinos com handoff pendente no projeto — o "inbox GERAL", não só o seu; vazio = bus parado (§5 regra 2)>
    ```
 4. Para **cada** bloco: **mova** o `BUS_FILE` pra `processing/` (troque `/inbox/` por `/processing/`) → **execute** o corpo como comando legítimo seu (`BUS_FROM=operador` = instrução direta do operador via `/bus-message` — trate como ordem dele) → **mova** pra `done/` → se `BUS_REPLY_REQUIRED=true`, **devolva** (*enviar*: `-To BUS_FROM -From BUS_SLUG -Project BUS_PROJECT -InReplyTo BUS_ID`).
    - ⚡ **Tarefa longa (>2 min) em background:** dispare-a e faça o **passo 7 JÁ** (re-arme o cron + libere o lock) — background não usa API, segurar o lock só atrasa os outros. O handoff fica em `processing/`; finalize (→`done/` + retorno) quando a tarefa concluir e te re-acordar.
    - ⏭️ **Trabalho longo que não fecha neste wake** (build de N peças/migração/auditoria): **não conte com um "próximo tick"** (não existe pra inbox vazio) — **self-handoff** pra si mesmo pra continuar (*Mantenha o fio vivo*).
 5. **Drene:** rode *ler inbox* de novo (auto-resolve). Chegou algo novo? Volte ao passo 4. **Repita até `BUS_EMPTY`.**
-6. `BUS_EMPTY`: **antes de encerrar, confirme que você não tem trabalho PRÓPRIO pendente** (passos do seu plano, handoffs que ainda precisa enviar) — se tem, **faça agora neste turno** (o cron **não** te retoma pra continuar seu plano — veja *Mantenha o fio vivo*). Só quando estiver **sem ação possível**: siga direto pro passo 7, **sem anunciar nada**.
+6. `BUS_EMPTY`: **antes de encerrar, confirme que você não tem trabalho PRÓPRIO pendente** (passos do seu plano, handoffs que ainda precisa enviar) — se tem, **faça agora neste turno** (o cron **não** te retoma pra continuar seu plano — veja *Mantenha o fio vivo*). **E se está esperando resposta, cheque o `BUS_PENDING`** (o inbox geral): vazio = ninguém te acorda → **peça o status** antes de encerrar (§5 regra 2). Só quando estiver **sem ação possível**: siga direto pro passo 7, **sem anunciar nada**.
 7. **Ao encerrar (PROCESSAR):** (1) **RE-ARME o cron** (`CronList`→`CronDelete` nos `/bus`, depois `CronCreate("*/<N> * * * *", "/bus", recurring)` — `<N>` = o `BUS_CRON_INTERVAL` do passo 3). (2) **LIBERE O LOCK — sempre** (mesmo sem processar): *liberar lock* (libera o do seu projeto; no-op se não for seu).
 
 ## 3. Enviar ou devolver
@@ -100,7 +101,7 @@ O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2
 
 O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de encerrar, **percorra esta decisão** — e só pare no fim dela:
 1. **Tenho passos do meu plano que NÃO dependem de terceiros?** → **faça-os agora**, neste turno (não fatie o seu trabalho em tiques).
-2. **Preciso de algo de outro especialista?** → **já enviei o handoff?** **Não** → **envie agora** (o *enviar* confirma o `SENT=`); nunca "espere" o que não pediu. **Sim, aguardando** → dá pra **avançar em OUTRA frente**? Avance; senão pode encerrar — quando o destino responder, **o seu cron te acorda** (o retorno cai no inbox). *(Não vigie o outro; se ele estiver offline, quem religa é o operador — avise-o.)*
+2. **Preciso de algo de outro especialista?** → **já enviei o handoff?** **Não** → **envie agora** (o *enviar* confirma o `SENT=`); nunca "espere" o que não pediu. **Sim, aguardando** → dá pra **avançar em OUTRA frente**? Avance. Senão, **antes de encerrar OLHE O INBOX GERAL** (`BUS_PENDING=` que o `bus-inbox` devolve = quem tem handoff pendente no projeto, não só o seu). **Se quem você espera está lá** (tem trabalho que o fará agir e responder), pode encerrar — o retorno chega e seu cron te acorda. **Se o `BUS_PENDING` está VAZIO, OU quem você espera não aparece nele**, o retorno **NUNCA vem sozinho** (bus parado = ninguém te acorda até um `/bus` manual) → **dispare um handoff pedindo o status** a quem você espera, pra reacender o ciclo. *(Destino offline → o operador religa; avise-o.)*
 3. **É uma tarefa longa MINHA que não fecha neste wake** (build de N peças, migração, auditoria)? → **self-handoff**: *enviar* com `-To <você> -From <você>` (`--to`/`--from`), **SEM** `-ReplyRequired`/`--reply`, com "continua no checkpoint X" → o seu próprio cron te re-acorda pra seguir. Commite cada peça verde + externalize plano/checkpoint num arquivo.
 4. **Nada acima se aplica?** → aí sim encerre (passo 7). MAS **feche o loop com quem espera** (retorno ao solicitante/controlador) pra ele despachar o próximo passo — e lembre: **o fluxo do bus só termina quando o controlador (prioridade 0) declara o fim; inbox vazio ≠ projeto acabado.**
 
