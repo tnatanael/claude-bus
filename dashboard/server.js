@@ -36,12 +36,16 @@ const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newe
 // verde < 6min; amarelo 6-10min (perdeu ~1 ciclo); vermelho > 10min OU nunca visto (offline).
 // Quem SEGURA o lock (trabalhando) e promovido a verde depois (markWorking): num turno longo
 // o seen fica "velho" mas a sessao esta MAIS viva que nunca -- nao e offline.
-const SEEN_GREEN_SEC = 6 * 60;
-const SEEN_YELLOW_SEC = 10 * 60;
-function seenStatus(ageSec) {
+// Limiar ESCALADO pelo intervalo do cron (N min, configuravel no dashboard). Um saudavel tica
+// a cada N min -> seen ate ~N + jitter. verde <= ~1.5N (+jitter, ticou dentro de ~1 ciclo);
+// amarelo <= ~2.5N (perdeu ~1 ciclo); vermelho > isso ou nunca visto. (Antes era fixo 6/10min,
+// entao com check de 15min todo mundo aparecia offline.) Holder do lock -> verde (markWorking).
+function seenStatus(ageSec, intervalSec) {
   if (ageSec == null) return 'red';
-  if (ageSec <= SEEN_GREEN_SEC) return 'green';
-  if (ageSec <= SEEN_YELLOW_SEC) return 'yellow';
+  const N = (intervalSec && intervalSec > 0) ? intervalSec : 300;   // fallback 5min
+  const jitter = 90;                                                // margem p/ o jitter do harness
+  if (ageSec <= N * 1.5 + jitter) return 'green';
+  if (ageSec <= N * 2.5 + jitter) return 'yellow';
   return 'red';
 }
 
@@ -236,7 +240,7 @@ const RESERVED_DIRS = new Set(['inbox', 'processing', 'done', 'rejected', 'names
 
 // names/<sid>.txt = 2 linhas (projeto, slug). Roster: projeto -> [{slug, status, seenAgeSec, prio}].
 // (compat: arquivo de 1 linha = projeto 'default'.)
-function readRoster() {
+function readRoster(intervalSec) {
   const roster = {};
   for (const f of safeReaddir(path.join(BUS_ROOT, 'names'))) {
     if (!f.endsWith('.txt')) continue;
@@ -254,7 +258,7 @@ function readRoster() {
       const st = fs.statSync(path.join(BUS_ROOT, 'seen', sid));
       seenAgeSec = Math.floor(Date.now() / 1000) - Math.floor(st.mtimeMs / 1000);
     } catch (_) {}
-    (roster[proj] = roster[proj] || []).push({ slug, status: seenStatus(seenAgeSec), seenAgeSec });
+    (roster[proj] = roster[proj] || []).push({ slug, status: seenStatus(seenAgeSec, intervalSec), seenAgeSec });
   }
   for (const p of Object.keys(roster)) {
     const prio = readPriorities(p === 'default' ? BUS_ROOT : path.join(BUS_ROOT, p));   // 1x por projeto
@@ -368,7 +372,8 @@ function markWorking(specs, holder) {
 }
 function buildPayload(p) {
   p = p || 'all';
-  const roster = readRoster();
+  const cronInterval = readCronInterval();          // 1x por request; escala o limiar do seen e vai no payload
+  const roster = readRoster(cronInterval * 60);
   if (p === 'all') {
     const now = Math.floor(Date.now() / 1000);
     const projects = listProjects().map(name => {
@@ -378,7 +383,7 @@ function buildPayload(p) {
       attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
       return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder, paused: readPaused(projectRoot(name)) };
     });
-    return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean), cronInterval: readCronInterval() };
+    return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean), cronInterval };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
@@ -387,7 +392,7 @@ function buildPayload(p) {
   st.specialists = roster[p] || [];
   attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
   st.paused = readPaused(projectRoot(p));
-  st.cronInterval = readCronInterval();
+  st.cronInterval = cronInterval;
   return st;
 }
 
