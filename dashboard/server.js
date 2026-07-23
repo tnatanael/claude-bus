@@ -102,10 +102,23 @@ function parseHandoffHeader(text) {
   return out;
 }
 
-function readHandoffs(folder, root) {
+function readHandoffs(folder, root, limit) {
   const dir = path.join(root || BUS_ROOT, folder);
+  let names = safeReaddir(dir).filter(f => f.endsWith('.handoff'));
+  // PERF: o done/ acumula MILHARES de handoffs. Ler+parsear TODO arquivo a cada poll (1.5s) gera
+  // muito garbage e degrada o Node ao longo de HORAS (GC crescente -> /api/state e o switch ficam
+  // lentos). Quando o chamador so precisa dos N mais novos (a view do done, cap 20), ordena os
+  // NOMES pelo id (prefixo de timestamp YYYYMMDD-HHMMSS, extraido SEM ler o arquivo) e le so os N
+  // -> I/O e alocacao CONSTANTES, nao crescem com o tamanho do done/.
+  if (limit && names.length > limit) {
+    names = names
+      .map(f => ({ f, id: (parseHandoffFilename(f) || {}).id || '' }))
+      .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))   // mais novo primeiro
+      .slice(0, limit)
+      .map(x => x.f);
+  }
   const items = [];
-  for (const f of safeReaddir(dir)) {
+  for (const f of names) {
     const fromName = parseHandoffFilename(f);
     if (!fromName) continue;
     const header = parseHandoffHeader(safeReadText(path.join(dir, f)));
@@ -191,7 +204,8 @@ function buildState(root) {
   const handoffs = {};
   const counts = {};
   for (const folder of HANDOFF_FOLDERS) {
-    let items = readHandoffs(folder, root);
+    // done: le so os N mais novos (a view mostra 20) -> nao le os milhares do done/ a cada poll.
+    let items = readHandoffs(folder, root, folder === 'done' ? DONE_MAX_ITEMS : undefined);
     if (folder === 'done') {
       // Self-cleaning VIEW (the BUS on disk is never touched -- read-only boundary):
       // show only the last 24h, newest first, capped to the most recent 20.
