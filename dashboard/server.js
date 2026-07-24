@@ -36,16 +36,17 @@ const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newe
 // verde < 6min; amarelo 6-10min (perdeu ~1 ciclo); vermelho > 10min OU nunca visto (offline).
 // Quem SEGURA o lock (trabalhando) e promovido a verde depois (markWorking): num turno longo
 // o seen fica "velho" mas a sessao esta MAIS viva que nunca -- nao e offline.
-// Limiar ESCALADO pelo intervalo do cron (N min, configuravel no dashboard). Um saudavel tica
-// a cada N min -> seen ate ~N + jitter. verde <= ~1.5N (+jitter, ticou dentro de ~1 ciclo);
-// amarelo <= ~2.5N (perdeu ~1 ciclo); vermelho > isso ou nunca visto. (Antes era fixo 6/10min,
-// entao com check de 15min todo mundo aparecia offline.) Holder do lock -> verde (markWorking).
+// Limiar ESCALADO pelo intervalo do cron (N min, configuravel no dashboard). O tick idle sofre
+// MUITO jitter (so dispara com o REPL ocioso), entao um saudavel pode ficar quieto varios ciclos
+// sem estar offline. Tolerancia generosa (pedido do operador 2026-07-24: com check=15min, verde
+// ate ~1h -- 28min nao pode dar aviso): verde <= 4N, amarelo <= 6N, vermelho alem ou nunca visto.
+// (N=15min -> verde 60min, amarelo 90min; N=5 default -> verde 20min, amarelo 30min.) O holder do
+// lock e promovido a verde depois (markWorking) -- trabalhando != offline.
 function seenStatus(ageSec, intervalSec) {
   if (ageSec == null) return 'red';
   const N = (intervalSec && intervalSec > 0) ? intervalSec : 300;   // fallback 5min
-  const jitter = 90;                                                // margem p/ o jitter do harness
-  if (ageSec <= N * 1.5 + jitter) return 'green';
-  if (ageSec <= N * 2.5 + jitter) return 'yellow';
+  if (ageSec <= N * 4) return 'green';
+  if (ageSec <= N * 6) return 'yellow';
   return 'red';
 }
 
