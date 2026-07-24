@@ -13,7 +13,7 @@
 # Demais partes best-effort no Unix -- validar (parsing JSON via sed assume prompts simples;
 # o lock guarda exp_epoch p/ comparacao numerica e expiry ISO p/ o dashboard).
 SEEN_STALE_MIN=180
-LEASE_MIN=30
+LEASE_MIN=60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
 
 # Forense: acquire/steal/defer-race vao pra <base>/.bus-gate.log (best-effort, nunca quebra).
 # (Bash nao tem o fail-open por-excecao do .ps1: aqui um erro nao vira "exit 0 sem lock" -- o

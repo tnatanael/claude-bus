@@ -16,7 +16,7 @@
 # Forense: acquire/steal/defer-race/fail-open vao pra <base>/.bus-gate.log (best-effort).
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
-$LEASE_MIN      = 30      # lease bootstrap; o modelo pode refinar p/ estimate dentro do turno
+$LEASE_MIN      = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
 
 function BusLog($base, $sid, $slug, $decision) {
   # append best-effort ao log forense; NUNCA lanca (logar nao pode afetar o gate).
