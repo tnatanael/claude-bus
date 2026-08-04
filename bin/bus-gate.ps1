@@ -14,6 +14,13 @@
 # conhecida, tenta ADQUIRIR o lock mesmo apos o erro -- se outro o segura (fresco) defere
 # (nao sobrepoe), senao adquire e passa COM o lock. Preserva o invariante mesmo sob falha.
 # Forense: acquire/steal/defer-race/fail-open vao pra <base>/.bus-gate.log (best-effort).
+#
+# DEFER SILENCIOSO (NAO reintroduzir stderr nos defers automaticos): todo exit 2 e renderizado
+# pelo app como um card "Um hook bloqueou seu prompt" com o texto do stderr. Como o tick ocioso
+# dispara a cada N min em CADA sessao, isso enchia a conversa de cards. Os defers AUTOMATICOS
+# (empty/lock/prio/race/paused) agora saem CALADOS -- o registro vive no .bus-gate.log e o
+# seen/<sid> prova que o tick rodou. Stderr SO nos caminhos que o operador acionou na mao
+# (/bus-message ok/erro), onde a resposta e esperada.
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
 $LEASE_MIN      = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
@@ -180,8 +187,7 @@ try {
   # turno normalmente -- o gate so age ANTES de acordar o modelo. Config (/bus <args>) e
   # /bus-message ja passaram antes daqui, entao seguem funcionando com o projeto pausado.
   if (Test-Path -LiteralPath (Join-Path $projRoot '.bus-paused')) {
-    [Console]::Error.WriteLine('BUS: projeto ' + $project + ' PAUSADO -- deferido ate dar play no dashboard.')
-    BusLog $base $sid $slug 'defer-paused'
+    BusLog $base $sid $slug 'defer-paused'   # SILENCIOSO (ver nota no topo): so o log
     exit 2
   }
 
@@ -194,8 +200,7 @@ try {
       $L = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
       $exp = [datetimeoffset]::Parse($L.expiry)
       if ($now -lt $exp -and $L.sid -ne $sid) {
-        [Console]::Error.WriteLine('BUS: outro especialista esta trabalhando (lock global) -- deferido p/ o proximo ciclo.')
-        BusLog $base $sid $slug ("defer-lock>" + ([string]$L.slug))
+        BusLog $base $sid $slug ("defer-lock>" + ([string]$L.slug))   # SILENCIOSO
         exit 2
       }
     } catch {}   # lock corrompido/ilegivel -> trata como livre
@@ -235,8 +240,7 @@ try {
   # senao a logica normal de re-arme/empty segue valendo. (PO/coordenador: prioridade baixa
   # -> processa por ultimo.)
   if ($myPending -and $higherPending) {
-    [Console]::Error.WriteLine('BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.')
-    BusLog $base $sid $slug ("defer-prio>" + $higherSlug)
+    BusLog $base $sid $slug ("defer-prio>" + $higherSlug)   # SILENCIOSO
     exit 2
   }
 
@@ -258,15 +262,14 @@ try {
       } catch {}
     }
     if ($acquired) { BusLog $base $sid $slug $how; exit 0 }
-    [Console]::Error.WriteLine('BUS: lock tomado na corrida -- deferido.')
-    BusLog $base $sid $slug 'defer-race'
+    BusLog $base $sid $slug 'defer-race'   # SILENCIOSO
     exit 2
   }
 
   # 6. Inbox vazia -- so chega aqui o BARE /bus sem trabalho (manual/config ja saiu no passo 3b).
   if ($seenAgeMin -gt $SEEN_STALE_MIN) { exit 0 }   # gap > 3h -> deixa re-armar o cron
-  [Console]::Error.WriteLine('BUS: nada pendente -- pulando (cron segue armado, custo zero).')
-  exit 2
+  exit 2   # SILENCIOSO: tick ocioso e o caso MAIS comum -- stderr aqui virava um card por tick.
+           # Prova de que o tick rodou = o mtime do seen/<sid> (o dashboard mostra).
 
 } catch {
   # Fail-open BLINDADO. Nunca trava prompt nao-/bus nem sem sid. Mas pra /bus de sessao

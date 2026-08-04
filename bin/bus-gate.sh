@@ -136,7 +136,6 @@ main() {
   # Quem ja processa (segurando o lock) termina o turno; so os PROXIMOS ticks deferem. Config e
   # /bus-message ja passaram antes daqui.
   if [ -e "$projroot/.bus-paused" ]; then
-    echo "BUS: projeto $project PAUSADO -- deferido ate dar play no dashboard." >&2
     buslog "$base" "$sid" "$slug" "defer-paused"
     exit 2
   fi
@@ -147,7 +146,6 @@ main() {
     lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
     if [ -n "$lexp" ] && [ "$now" -lt "$lexp" ] && [ "$lsid" != "$sid" ]; then
-      echo 'BUS: outro especialista esta trabalhando (lock global) -- deferido.' >&2
       buslog "$base" "$sid" "$slug" "defer-lock>$lsid"
       exit 2
     fi
@@ -184,7 +182,6 @@ main() {
   # 4b. PRIORIDADE: cedo a vez (defiro) se EU tenho trabalho e existe handoff p/ alguem de
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
   if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
-    echo 'BUS: prioridade menor -- ha handoff p/ especialista de prioridade maior; cedendo a vez.' >&2
     buslog "$base" "$sid" "$slug" "defer-prio>$higherslug"
     exit 2
   fi
@@ -206,14 +203,13 @@ main() {
     if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; }; then
       printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" acquire-steal; exit 0
     fi
-    echo 'BUS: lock tomado na corrida -- deferido.' >&2
     buslog "$base" "$sid" "$slug" defer-race
     exit 2
   fi
 
   # 5. inbox vazia -- so chega aqui o BARE /bus sem trabalho (manual/config ja saiu no 3b)
   if [ "$seen_age_min" -gt "$SEEN_STALE_MIN" ]; then exit 0; fi
-  echo 'BUS: nada pendente -- pulando (cron segue armado, custo zero).' >&2
+  # SILENCIOSO: tick ocioso e o caso MAIS comum -- stderr aqui virava um card por tick no app.
   exit 2
 }
 main
