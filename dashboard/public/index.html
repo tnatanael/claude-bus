@@ -959,11 +959,11 @@ function renderPause(state) {
   const off = document.getElementById("offBtn");
   if (!btn || !off) return;
   if (!state || state.all || !state.project) { btn.style.display = "none"; off.style.display = "none"; return; }
-  const pname = String(state.project).toUpperCase();
   btn.style.display = "";
   btn.dataset.project = state.project;
-  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶ Retomar " + pname; btn.dataset.paused = "1"; }
-  else { btn.className = "pausebtn running"; btn.textContent = "⏸ Pausar " + pname; btn.dataset.paused = "0"; }
+  btn.title = "Pausa/retoma SÓ o projeto selecionado (" + state.project + ")";
+  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶ Retomar"; btn.dataset.paused = "1"; }
+  else { btn.className = "pausebtn running"; btn.textContent = "⏸ Pausar"; btn.dataset.paused = "0"; }
 
   // Desativar: so faz sentido com especialista ATIVO (verde) -- so eles recebem o handoff.
   const green = (state.specialists || []).filter(s => s.status === "green");
