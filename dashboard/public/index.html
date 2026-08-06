@@ -377,6 +377,9 @@
 .pausebtn:hover { border-color: rgba(255,255,255,.35); }
 .pausebtn.running { background: rgba(224,160,0,.14); border-color: rgba(224,160,0,.45); color: #ffcf66; }
 .pausebtn.paused { background: rgba(80,200,120,.16); border-color: rgba(80,200,120,.55); color: #7fe0a0; }
+.offbtn { margin-left: 6px; padding: 2px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; background: rgba(230,70,70,.12); border: 1px solid rgba(230,70,70,.45); color: #ff8f8f; }
+.offbtn:hover { background: rgba(230,70,70,.22); border-color: rgba(230,70,70,.75); }
+.offbtn:disabled { opacity: .5; cursor: default; }
 .lk-info { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:5px; border-radius:50%; background:rgba(255,255,255,.18); color:#fff; font-size:11px; font-weight:700; cursor:help; position:relative; vertical-align:middle; }
 .lk-info .lk-tip { display:none; position:absolute; top:150%; right:0; z-index:50; width:310px; padding:10px 12px; border-radius:8px; background:#1b1f27; border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 28px rgba(0,0,0,.55); color:#dfe4ea; font-size:12px; font-weight:400; line-height:1.5; text-align:left; white-space:normal; }
 .lk-info:hover .lk-tip, .lk-info:focus .lk-tip { display:block; }
@@ -408,8 +411,8 @@
 </head>
 <body>
 <header>
-  <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco — o dashboard nunca escreve nos handoffs (só o botão Pausar toca o marcador de pausa). Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span></h1>
-  <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button></span>
+  <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco, com duas exceções, ambas por clique explícito seu: <b>Pausar</b> (liga/desliga o marcador de pausa do projeto) e <b>Desativar</b> (enfileira um handoff de encerramento pra cada especialista ativo do projeto). Nunca move nem apaga handoff existente. Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span></h1>
+  <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button><button id="offBtn" class="offbtn" style="display:none" title="Encerra o BUS deste projeto: manda cada especialista ATIVO (verde) desarmar o cron e parar. Quem já está offline não recebe nada.">⏻ Desativar</button></span>
   <div class="meta">
     <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
     <span class="cron-cfg" title="Intervalo do auto-recheck (cron */N min, 1–30). Grava no BUS; cada especialista pega no próximo /bus (~1 ciclo, não é instantâneo).">check: <button class="cron-step" id="cronDec" type="button">−</button><b id="cronVal">5</b>m<button class="cron-step" id="cronInc" type="button">+</button></span>
@@ -948,15 +951,27 @@ function setProjTitle(state) {
   el.textContent = state.all ? " · TODOS" : (" · " + projLabel(state.project));
 }
 
-// Botao Pausar/Retomar -- so na visao de projeto unico (a pausa e por projeto).
+// Botoes Pausar/Retomar e Desativar -- SO na visao de projeto unico: as duas acoes sao
+// POR PROJETO (o servidor rejeita project=all). O nome do projeto vai NO ROTULO pra nao
+// restar duvida do escopo do clique.
 function renderPause(state) {
   const btn = document.getElementById("pauseBtn");
-  if (!btn) return;
-  if (!state || state.all || !state.project) { btn.style.display = "none"; return; }
+  const off = document.getElementById("offBtn");
+  if (!btn || !off) return;
+  if (!state || state.all || !state.project) { btn.style.display = "none"; off.style.display = "none"; return; }
+  const pname = String(state.project).toUpperCase();
   btn.style.display = "";
   btn.dataset.project = state.project;
-  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶ Retomar"; btn.dataset.paused = "1"; }
-  else { btn.className = "pausebtn running"; btn.textContent = "⏸ Pausar"; btn.dataset.paused = "0"; }
+  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶ Retomar " + pname; btn.dataset.paused = "1"; }
+  else { btn.className = "pausebtn running"; btn.textContent = "⏸ Pausar " + pname; btn.dataset.paused = "0"; }
+
+  // Desativar: so faz sentido com especialista ATIVO (verde) -- so eles recebem o handoff.
+  const green = (state.specialists || []).filter(s => s.status === "green");
+  off.style.display = "";
+  off.dataset.project = state.project;
+  off.dataset.green = green.map(s => s.slug).join(",");
+  off.textContent = "⏻ Desativar" + (green.length ? " (" + green.length + ")" : "");
+  off.disabled = green.length === 0;
 }
 
 function render(state) {
@@ -1133,6 +1148,35 @@ document.getElementById("pauseBtn").addEventListener("click", async (e) => {
     await tick();
   } catch (_) {}
   btn.disabled = false;
+});
+
+// Botao Desativar -> encerra o BUS do projeto SELECIONADO: o servidor enfileira um handoff
+// de encerramento pra cada especialista ATIVO (verde); cada um acorda uma vez, desarma o
+// proprio cron e para. Quem esta amarelo/vermelho NAO recebe nada (evita lixo no inbox).
+// Confirmacao obrigatoria: religar exige /bus <slug> <projeto> em cada sessao na mao.
+document.getElementById("offBtn").addEventListener("click", async (e) => {
+  const off = e.currentTarget;
+  const proj = off.dataset.project;
+  const green = (off.dataset.green || "").split(",").filter(Boolean);
+  if (!proj || proj === "all" || !green.length) return;
+  const msg = "DESATIVAR o BUS do projeto " + proj.toUpperCase() + "?\n\n"
+            + "Vai mandar handoff de encerramento para " + green.length + " especialista(s) ATIVO(s):\n"
+            + "  " + green.join(", ") + "\n\n"
+            + "Cada um acorda UMA vez, desarma o proprio cron e para.\n"
+            + "Quem esta offline (amarelo/vermelho) nao recebe nada.\n\n"
+            + "Pra religar depois: /bus <slug> " + proj + " em cada sessao.";
+  if (!window.confirm(msg)) return;
+  off.disabled = true;
+  try {
+    const r = await fetch("/api/shutdown", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: proj }) });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.error) window.alert("Falhou: " + j.error);
+    else window.alert("Encerramento enfileirado para: " + ((j.sent || []).join(", ") || "(ninguem)")
+                    + ((j.skipped || []).length ? "\n\nIgnorados (offline): " + j.skipped.map(s => s.slug).join(", ") : ""));
+    lastHandoffSig = "";
+    await tick();
+  } catch (err) { window.alert("Falhou: " + err); }
+  off.disabled = false;
 });
 
 // bus root: trunca em ~20 chars (mostra o FIM = o projeto); tooltip com o caminho completo; clique copia.

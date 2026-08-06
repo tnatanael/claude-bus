@@ -9,9 +9,12 @@
  *   - GET /api/events : Server-Sent Events stream of the same JSON (optional, cheap)
  *   - everything else : static files from public/ (frontend's domain)
  *
- * SAFETY BOUNDARY (non-negotiable): this server is READ ONLY against the BUS root.
- * It never creates, moves, modifies, or deletes anything under the BUS root. Only
- * fs read calls (readdirSync / readFileSync / statSync) are used against it.
+ * SAFETY BOUNDARY: this server is READ ONLY against the BUS root, with exactly TWO
+ * deliberate exceptions, both operator-initiated by an explicit button click:
+ *   1. POST /api/pause    -> toggles the <projeto>/.bus-paused marker (nothing else).
+ *   2. POST /api/shutdown -> writes ONE operador->slug handoff per ACTIVE (green)
+ *      specialist of the project, telling it to disarm its cron and stand down.
+ * It never moves, modifies, or deletes existing handoffs. Everything else is fs reads.
  */
 
 const http = require('http');
@@ -352,6 +355,51 @@ function readPaused(root) {
   try { return fs.existsSync(path.join(root, '.bus-paused')); } catch (_) { return false; }
 }
 
+// ---- DESATIVAR (escrita #2 do dashboard, ver SAFETY BOUNDARY no topo) --------------------
+// Corpo do handoff de encerramento. E a UNICA excecao a doutrina "mantenha o fio vivo"
+// (SKILL SS5): aqui o ciclo termina de proposito, por ordem explicita do operador.
+const SHUTDOWN_BODY = [
+  'BUS-SHUTDOWN',
+  '',
+  'O operador ENCERROU o BUS deste projeto pelo dashboard.',
+  '',
+  'Acao obrigatoria nesta passada:',
+  '1. Desarme o cron de auto-recheck desta sessao (CronDelete em TODOS os crons /bus)',
+  '   e NAO re-arme (nao execute o re-arme do passo 7).',
+  '2. NAO dispare handoff de despedida, status ou confirmacao -- ninguem esta esperando.',
+  '3. Libere o lock e encerre o turno em silencio.',
+  '',
+  'Esta e a UNICA excecao a doutrina "mantenha o fio vivo": aqui o ciclo termina de proposito.',
+  'Para religar, o operador roda /bus <slug> <projeto> nesta sessao.'
+].join('\r\n');
+
+// Le o .bus-secret do projeto. NAO cria (o dashboard nao inventa estado): sem secret,
+// nenhum handoff jamais circulou nesse projeto -- nao ha o que encerrar.
+function readSecret(root) {
+  const s = safeReadText(path.join(root, '.bus-secret'));
+  return s ? s.trim() : '';
+}
+
+// Escreve um handoff operador->slug no inbox do projeto, no MESMO formato do bus-send/gate:
+// escrita atomica (tmp + rename) pro leitor nunca pegar arquivo pela metade, CRLF, UTF-8 sem BOM.
+function writeOperadorHandoff(root, secret, slug, body) {
+  const d = new Date();
+  const p2 = n => String(n).padStart(2, '0');
+  const id = '' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-'
+           + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '-'
+           + require('crypto').randomBytes(3).toString('hex');
+  const inbox = path.join(root, 'inbox');
+  fs.mkdirSync(inbox, { recursive: true });
+  const final = path.join(inbox, 'to-' + slug + '__from-operador__' + id + '.handoff');
+  const tmp = final + '.tmp';
+  const lines = ['###BUS-START', 'id: ' + id, 'from: operador', 'to: ' + slug,
+                 'auth: ' + secret, 'reply_required: false', 'in_reply_to: ', '---',
+                 body, '###BUS-END'];
+  fs.writeFileSync(tmp, lines.join('\r\n') + '\r\n', 'utf8');
+  fs.renameSync(tmp, final);
+  return id;
+}
+
 // Intervalo do cron de auto-recheck (GLOBAL, marcador <base>/.bus-cron-interval, minutos).
 // Configuravel pelo dashboard; os especialistas leem via bus-name/bus-inbox e armam */N no
 // PROXIMO arm (nao e instantaneo -- converge em ~1 ciclo). Default 5, clamp [1,30].
@@ -545,6 +593,47 @@ const server = http.createServer((req, res) => {
           try { fs.unlinkSync(marker); } catch (_) {}
         }
         sendJson(res, { project: proj, paused: !!d.paused });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
+    return;
+  }
+
+  // DESATIVAR o projeto: enfileira UM handoff de encerramento por especialista ATIVO (verde).
+  // So verdes -- mandar pra quem ja esta offline so deixaria lixo no inbox (decisao do operador).
+  // Nao pausa: o gate PRECISA deixar o tick passar pra cada um receber o shutdown e desarmar.
+  if (req.method === 'POST' && urlPath === '/api/shutdown') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const d = JSON.parse(body || '{}');
+        const proj = d.project;
+        if (!proj || proj === 'all' || !/^[a-zA-Z0-9_-]+$/.test(proj)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'valid project required' }));
+          return;
+        }
+        const root = projectRoot(proj);
+        const secret = readSecret(root);
+        if (!secret) {
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'projeto sem .bus-secret -- nada a encerrar' }));
+          return;
+        }
+        // status verde = mesma regra do chip (seen fresco OU segurando o lock/trabalhando).
+        const roster = readRoster(readCronInterval() * 60);
+        const specs = roster[proj] || [];
+        markWorking(specs, readLockHolder(root));
+        const green = specs.filter(s => s.status === 'green');
+        const skipped = specs.filter(s => s.status !== 'green').map(s => ({ slug: s.slug, status: s.status }));
+        const sent = [];
+        for (const s of green) {
+          try { writeOperadorHandoff(root, secret, s.slug, SHUTDOWN_BODY); sent.push(s.slug); } catch (_) {}
+        }
+        sendJson(res, { project: proj, sent, skipped });
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String(e) }));

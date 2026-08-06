@@ -5,10 +5,27 @@ dependências (Node stdlib: `http`, `fs`, `path`). `node server.js` sobe em `:78
 serve a API JSON e o `public/index.html` estático.
 
 ## SAFETY BOUNDARY (inegociável)
-O dashboard é **READ ONLY** sobre o BUS: nunca cria, move, altera ou apaga nada sob a
-raiz do BUS — só lê (`readdirSync` / `readFileSync` / `statSync`). Guard de path
-traversal; qualquer método != GET → 405. A coluna `done` é filtrada **só na exibição**
-(últimas 24h, máx 20), o disco nunca é alterado.
+O dashboard é **READ ONLY** sobre os handoffs existentes: nunca move, altera ou apaga um
+handoff que já está no BUS — só lê (`readdirSync` / `readFileSync` / `statSync`). Guard de
+path traversal. A coluna `done` é filtrada **só na exibição** (últimas 24h, máx 20), o disco
+nunca é alterado.
+
+**Escritas permitidas** (todas por clique explícito do operador, nunca automáticas, e todas
+com o nome do projeto validado contra `^[a-zA-Z0-9_-]+$` e `project=all` rejeitado):
+`POST /api/pause` (marcador `<projeto>/.bus-paused`), `POST /api/cron-interval`
+(`<base>/.bus-cron-interval`, 1–30), `POST /api/cancel` (remove um handoff `from-operador`
+ainda no inbox) e `POST /api/shutdown` (**Desativar**: escreve um handoff `operador→slug`
+novo por especialista ATIVO do projeto — ver abaixo).
+
+### Desativar (`POST /api/shutdown`)
+Encerra o BUS **do projeto selecionado**: enfileira um handoff cujo corpo começa com
+`BUS-SHUTDOWN` para **cada especialista com `status === 'green'`** (ativo). Amarelo/vermelho
+são **pulados** de propósito — mandar pra quem está offline só deixaria lixo no inbox dele.
+A resposta é `{ project, sent: [slug], skipped: [{slug, status}] }`. O handoff sai no mesmo
+formato do `bus-send` (token do `.bus-secret` do projeto, escrita atômica tmp+rename). Cada
+especialista acorda uma vez, **desarma o próprio cron e NÃO re-arma** (`SKILL.md` passo 7,
+exceção) — é a única quebra autorizada da doutrina "mantenha o fio vivo". **Não** ativa a
+pausa: o gate precisa deixar o tique passar pra cada um receber o shutdown.
 
 ## Layout do BUS (por projeto)
 Base: `CLAUDE_BUS_ROOT` (padrão `/tmp/claude-bus`). Cada projeto é um namespace isolado:

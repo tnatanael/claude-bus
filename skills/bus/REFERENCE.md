@@ -31,6 +31,13 @@ Hoje a proteção contra auto-interrupção é **do modelo**: o ramo PROCESSAR d
 
 **Por que NÃO mover isso pro gate (ideia DESCARTADA):** deferir o próprio tick no gate deixaria o cron **permanente** (nunca re-criado). Na prática, um cron loop permanente **degrada em phantom depois de algumas horas** — para de disparar / some sozinho / acumula e perde referência (observado em operação real; causa exata desconhecida). **Re-armar do zero a cada processamento** (desarma no início do passo 2, cria de novo no passo 7) é o que mantém o loop **fresco** — por isso é load-bearing, não é só anti-interrupção. Logo a dança do cron **fica**. O que dá pra otimizar é tirar do modelo o trabalho **mecânico** (mover handoffs inbox→processing→done, resolver identidade) via script — não o ciclo do cron.
 
+## Desativar (botão do dashboard) — `BUS-SHUTDOWN`
+Encerra o BUS **do projeto selecionado**. O dashboard (`POST /api/shutdown`) enfileira um handoff `operador→slug` cujo corpo começa com **`BUS-SHUTDOWN`** para **cada especialista ATIVO (chip verde)** do projeto. Amarelo/vermelho são **pulados de propósito** (decisão do operador): mandar pra quem já está offline só deixaria lixo parado no inbox dele — e se ele voltar, segue rodando normal (o operador desativa de novo).
+
+Ao processar esse handoff, o especialista **desarma o cron e NÃO re-arma** (`SKILL.md` passo 7, exceção), libera o lock e encerra **em silêncio** (sem retorno/despedida — ninguém está esperando). É a **única exceção autorizada** à doutrina "mantenha o fio vivo" (§5): aqui parar é o certo, porque a ordem é explícita do operador.
+
+**Por que NÃO usa a pausa:** o marcador `.bus-paused` faz o gate deferir o tique — o especialista nunca acordaria pra receber o shutdown. Desativar depende do tique passar. Se quiser as duas coisas, desative primeiro e pause depois que os chips ficarem vermelhos. **Pra religar:** `/bus <slug> <projeto>` em cada sessão (o cron volta no arme do passo 2).
+
 ## /bus-message (instrução do operador, sem acordar o modelo)
 `/bus-message <texto>` é interceptado pelo **próprio gate** (hook `UserPromptSubmit`): ele resolve a identidade da sessão (`names/<sid>`), escreve um handoff `operador→seu-slug` no inbox do projeto (com o token, mesma lógica do bus-send) e **bloqueia o prompt (`exit 2`)** — o modelo **NÃO acorda**, custo ZERO de token. O especialista processa a instrução no próximo `/bus` (tick do cron ou manual), como qualquer handoff (`BUS_FROM=operador`, sem retorno). Como `/bus-message` não casa o regex `^/bus(\s|$)`, não interfere no gating normal do `/bus`. Há uma skill `bus-message` de **fallback**: se o hook não estiver instalado, o prompt chega ao modelo e a skill escreve o handoff via bus-send (custo pequeno, mas funciona).
 

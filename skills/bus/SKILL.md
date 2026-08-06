@@ -57,6 +57,7 @@ Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (a
 5. **Drene:** rode *ler inbox* de novo (auto-resolve). Chegou algo novo? Volte ao passo 4. **Repita até `BUS_EMPTY`.**
 6. `BUS_EMPTY`: **antes de encerrar, confirme que você não tem trabalho PRÓPRIO pendente** (passos do seu plano, handoffs que ainda precisa enviar) — se tem, **faça agora neste turno** (o cron **não** te retoma pra continuar seu plano — veja *Mantenha o fio vivo*). **E se está esperando resposta, cheque o `BUS_PENDING`** (o inbox geral): vazio = ninguém te acorda → **peça o status** antes de encerrar (§5 regra 2). Só quando estiver **sem ação possível**: siga direto pro passo 7, **sem anunciar nada**.
 7. **Ao encerrar (PROCESSAR):** (1) **RE-ARME o cron** (`CronList`→`CronDelete` nos `/bus`, depois `CronCreate("*/<N> * * * *", "/bus", recurring)` — `<N>` = o `BUS_CRON_INTERVAL` do passo 3). (2) **LIBERE O LOCK — sempre** (mesmo sem processar): *liberar lock* (libera o do seu projeto; no-op se não for seu).
+   - 🛑 **EXCEÇÃO — `BUS-SHUTDOWN`:** processou handoff do `operador` cujo corpo começa com **`BUS-SHUTDOWN`** (o operador clicou *Desativar* no dashboard)? Então **NÃO re-arme**: só **DESARME** (`CronList`→`CronDelete` em cada `/bus`, deixando **ZERO** agendado), libere o lock e **encerre em silêncio** — sem retorno, sem despedida, sem status. É a única vez em que parar é o certo.
 
 ## 3. Enviar ou devolver
 Escreva o corpo num arquivo temp com a ferramenta **Write**, rode *enviar* com `--body-file`/`-BodyFile` **e `--project`/`-Project`**. Destino do **mesmo projeto**.
@@ -98,6 +99,8 @@ O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2
 - ❌ **Pedir `/clear` ou "sessão fresca".** O contexto **compacta sozinho** quando enche — você não perde nada; `/clear` **APAGA** seu estado. Quer um contexto limpo pra uma peça delicada? O **self-handoff JÁ te dá isso**: o próximo tique é um **wake novo** com o plano re-injetado do handoff. `/clear` nunca é a resposta.
 - ❌ **Ficar "dormente"/"stand-down" esperando o operador retomar o SEU trabalho.** Ninguém te acorda pra isso — o cron só dispara com **handoff no inbox**. Fio parado = **bus travado**.
 - ❌ **Fatiar a SUA entrega em "passadas" que dependem de você ser re-chamado na mão.** É seu e continua? Ou **faça agora**, ou **self-handoff** (que te re-acorda sozinho). O operador **não é um passo** do seu fluxo.
+
+🛑 **Única exceção a TUDO nesta seção — `BUS-SHUTDOWN`:** handoff do `operador` cujo corpo começa com `BUS-SHUTDOWN` = ele clicou *Desativar* no dashboard e encerrou o BUS do projeto. Aí parar **é** o certo: desarme o cron, **não re-arme**, não mande retorno nem despedida, encerre (passo 7, exceção). Não percorra a decisão abaixo.
 
 O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de encerrar, **percorra esta decisão** — e só pare no fim dela:
 1. **Tenho passos do meu plano que NÃO dependem de terceiros?** → **faça-os agora**, neste turno (não fatie o seu trabalho em tiques).
