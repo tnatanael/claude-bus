@@ -1,8 +1,13 @@
 # bus-name.ps1
 # Resolve a IDENTIDADE desta sessao (PROJETO + SLUG), indexada por CLAUDE_CODE_SESSION_ID.
 # Persiste pra que religacoes do /bus na mesma sessao nao redigitem.
-#   -Set <slug> [-Project <proj>]  -> grava (projeto default = 'default') e ecoa.
+#   -Project <proj> -Set <slug>    -> grava e ecoa. O comando do operador e /bus <PROJETO> <slug>
+#                                     (projeto PRIMEIRO, v0.7.0); aqui os params sao nomeados,
+#                                     entao a ordem de digitacao nao importa -- o que importa e
+#                                     nao trocar o valor de um pelo do outro.
 #   (sem -Set)                      -> ecoa o registrado, ou 'NONE'.
+# Devolve INVERTED (+HINT) se o slug informado ja e um PROJETO e o projeto informado nao existe
+# -- provavel ordem antiga (slug primeiro); nao grava nada nesse caso.
 # Saida (quando registrado):
 #   PROJECT=<projeto>
 #   SLUG=<slug>
@@ -45,6 +50,21 @@ function Emit([string]$proj, [string]$slug) {
   Write-Output ('BUS_CRON_INTERVAL=' + $cronInterval)
 }
 
+# TRAVA ANTI-INVERSAO: a ordem do comando e /bus <PROJETO> <slug> (v0.7.0; era o inverso ate a
+# 0.6.x). Quem teclar a ordem antiga registraria um PROJETO com nome de especialista -- foi assim
+# que nasceu um projeto-fantasma na pratica. Sinal forte de inversao: o SLUG informado ja existe
+# como PROJETO e o PROJETO informado nao existe. Ai nao grava nada e devolve INVERTED.
+$RESERVED = @('names','seen','inbox','processing','done','rejected','presence','state')
+function Test-IsProject([string]$n) {
+  if ($n -eq '' -or ($RESERVED -contains $n)) { return $false }
+  if (Test-Path -LiteralPath (Join-Path $BusRoot $n) -PathType Container) { return $true }
+  foreach ($nf in (Get-ChildItem -LiteralPath $dir -Filter '*.txt' -File -ErrorAction SilentlyContinue)) {
+    $l = @((Get-Content -LiteralPath $nf.FullName -Raw -Encoding UTF8) -split "`r?`n")
+    if ($l.Count -ge 2 -and $l[1].Trim() -ne '' -and $l[0].Trim() -eq $n) { return $true }
+  }
+  return $false
+}
+
 if ($Set -ne '') {
   $proj = $Project.Trim()
   if ($proj -eq '' -or $proj -eq 'default') {
@@ -52,6 +72,11 @@ if ($Set -ne '') {
     exit 0
   }
   $slug = $Set.Trim()
+  if ((Test-IsProject $slug) -and -not (Test-IsProject $proj)) {
+    Write-Output 'INVERTED'
+    Write-Output ('HINT=a ordem e /bus <projeto> <slug>; "' + $slug + '" ja e um PROJETO. Voce quis /bus ' + $slug + ' ' + $proj + ' ?')
+    exit 0
+  }
   $enc = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($f, $proj + "`n" + $slug, $enc)
   # EVICCAO DE GHOST: este (projeto, slug) agora e DESTA sessao. Apaga qualquer names/<outroSid>

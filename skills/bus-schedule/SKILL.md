@@ -19,7 +19,7 @@ Agenda um handoff recorrente `operador→destino` no inbox do BUS. No disparo, u
 Chame direto o *listar* / *remover* e reporte a saída. (Remover apaga a tarefa do SO **e** os artefatos em `~/.claude/bus-schedules/<slug>/`.)
 
 ## `/bus-schedule create <prompt>` — fluxo
-1. **Identidade:** resolva via `bus-name` (sem args) → **PROJECT** + seu **SLUG**. `NONE` → esta sessão não está no BUS; peça pro operador rodar `/bus <slug> <projeto>` e **pare**.
+1. **Identidade:** resolva via `bus-name` (sem args) → **PROJECT** + seu **SLUG**. `NONE` → esta sessão não está no BUS; peça pro operador rodar `/bus <projeto> <slug>` e **pare**.
 2. **Parâmetros de cadência** (pergunte ao operador, curto, o que faltar):
    - **Dest** — pra quem vai o handoff (default = **você mesmo**, o slug desta sessão: um auto-kick recorrente).
    - **Cadência** — diária, ou semanal + dias.

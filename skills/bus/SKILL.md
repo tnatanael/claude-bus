@@ -1,12 +1,12 @@
 ---
 name: bus
-description: Comunicacao assincrona entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO. /bus <slug> <projeto> [prioridade] CONFIGURA a sessao (identidade/prioridade/auto-recheck); /bus bare (ou o auto-cron) PROCESSA os handoffs pendentes. O projeto e OBRIGATORIO. Comando cheio = configurar; /bus bare = processar. Cross-platform: Windows (PowerShell) e macOS/Linux (bash).
+description: Comunicacao assincrona entre sessoes-especialistas do Claude Code via um BUS de arquivos, com ESCOPO DE PROJETO. /bus <projeto> <slug> [prioridade] CONFIGURA a sessao (identidade/prioridade/auto-recheck); /bus bare (ou o auto-cron) PROCESSA os handoffs pendentes. O projeto e OBRIGATORIO. Comando cheio = configurar; /bus bare = processar. Cross-platform: Windows (PowerShell) e macOS/Linux (bash).
 ---
 
 # BUS — handoffs assíncronos entre especialistas (por projeto)
 
 Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude Code. **Dois usos do `/bus`:**
-- **`/bus <slug> <projeto> [prioridade]`** (com args) = **CONFIGURAR** (registra identidade/prioridade, arma o auto-recheck) e **PARA** — não processa.
+- **`/bus <projeto> <slug> [prioridade]`** (com args) = **CONFIGURAR** (registra identidade/prioridade, arma o auto-recheck) e **PARA** — não processa.
 - **`/bus`** (bare) = **PROCESSAR** (lê o inbox, executa o que é seu, responde). O cron de auto-recheck dispara o bare sozinho e **entrega os handoffs aos destinos**.
 
 **Escopo de projeto:** o **projeto é OBRIGATÓRIO** (o `default` foi removido). Cada projeto é isolado por pasta; você só **vê e endereça** especialistas do **mesmo projeto**. A mecânica interna (gate, lock, cron, auth, `/bus-message`, pausa) está em **`REFERENCE.md`** — não precisa relê-la pra operar.
@@ -16,7 +16,7 @@ Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude C
 
 | Operação | Windows | macOS / Linux |
 |---|---|---|
-| **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Set <slug> -Project <proj> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <slug> <proj> [prioridade]` |
+| **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Project <proj> -Set <slug> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <proj> <slug> [prioridade]` |
 | **ler inbox** (auto-resolve) | `PS "$ROOT\bin\bus-inbox.ps1"` | `bash "$ROOT/bin/bus-inbox.sh"` |
 | **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <proj> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <proj> [--reply] [--in-reply-to <id>]` |
 | **liberar lock** | `PS "$ROOT\bin\bus-lock.ps1" -Release` | `bash "$ROOT/bin/bus-lock.sh" --release` |
@@ -28,7 +28,9 @@ Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude C
 Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (ambos nativos).
 
 ## 1. Quem você é (projeto + slug)
-- **`/bus` COM args (CONFIG)** → grave via *nome — gravar*. O **projeto é OBRIGATÓRIO** (2º arg); 3º arg opcional = **prioridade** (0–1000, default 1000, menor cede mais). Registrar **reivindica** o slug (apaga sid antigo do mesmo slug+projeto — sem ghost). Se o operador não deu o projeto, **pergunte**. Se o `bus-name` responder `NEED_PROJECT` (faltou o projeto ou veio `default`), pergunte o projeto e repita.
+- **`/bus` COM args (CONFIG)** → **ORDEM: `/bus <projeto> <slug> [prioridade]` — o PROJETO vem PRIMEIRO** (1º arg = projeto, 2º = slug, 3º opcional = **prioridade** 0–1000, default 1000, menor cede mais). Grave via *nome — gravar*, **conferindo qual valor é qual** (os parâmetros são nomeados: `-Project`/`-Set`). O projeto é **OBRIGATÓRIO**. Registrar **reivindica** o slug (apaga sid antigo do mesmo slug+projeto — sem ghost).
+  - `NEED_PROJECT` (faltou o projeto ou veio `default`) ou `NEED_SLUG` → **pergunte** o que faltou e repita.
+  - **`INVERTED`** → o operador quase certamente digitou na **ordem antiga** (slug primeiro): o `bus-name` viu que o "slug" informado já é um **projeto** existente e **não gravou nada**. Mostre o `HINT=` e **confirme com ele** antes de repetir com a ordem certa.
 - **`/bus` BARE (PROCESSAR)** → **não resolva identidade aqui**: o `bus-inbox` (passo 3) a resolve sozinho e devolve `BUS_SLUG=`/`BUS_PROJECT=` no topo. Se devolver `BUS_IDENTITY=NONE` (sessão nunca registrada), **pergunte** o slug + projeto, registre (CONFIG) e pare.
 
 ## 2. O que o /bus faz
@@ -110,7 +112,7 @@ O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de en
 
 ## Notas / limitações
 - **Projeto = isolamento** e é **obrigatório** (sem `default`). Só vê/endereça o mesmo projeto.
-- Sessões precisam estar **abertas** (o cron só dispara com o app aberto; reabriu → `/bus <slug> <projeto>`, ou `/bus-reload` só pra religar o cron).
+- Sessões precisam estar **abertas** (o cron só dispara com o app aberto; reabriu → `/bus <projeto> <slug>`, ou `/bus-reload` só pra religar o cron).
 - **Entrega automática:** o cron do destino (a cada 5 min) processa os handoffs sozinho — não precisa anunciar nem rodar `/bus` manual. Destino fechado → o handoff espera no inbox (visível no dashboard) até reabrir.
 - **Sem auto-continuação:** o cron só dispara com **handoff no inbox**; inbox vazio = deferido. Trabalho longo que não fecha num wake precisa **se auto-enfileirar** (self-handoff, *Mantenha o fio vivo*) — **não há "próximo tick" automático** com inbox vazio. E o fluxo só termina quando o **controlador (prio 0)** declara o fim.
 - Handoff sem token válido vai pra `rejected/`. **Crash no meio:** o arquivo fica em `processing/` pra reprocessamento.

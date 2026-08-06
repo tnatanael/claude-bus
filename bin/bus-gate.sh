@@ -63,7 +63,7 @@ main() {
     r="$(enqueue_op_message "$bm_base" "$sid" "$bm_msg")"
     case "$r" in
       OK:*) pp="${r#OK:}"; ps="${pp%%:*}"; pj="${pp#*:}"; buslog "$bm_base" "$sid" "$ps" "op-message"; echo "BUS: mensagem enfileirada para $ps ($pj) -- sera processada no proximo /bus." >&2;;
-      *) echo "BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <slug> <projeto> primeiro, depois /bus-message." >&2;;
+      *) echo "BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <projeto> <slug> primeiro, depois /bus-message." >&2;;
     esac
     exit 2
   fi
@@ -81,7 +81,7 @@ main() {
   set -- $prompt
   [ "$1" = "/bus" ] && [ -n "$2" ] && ismanual=1
   if [ "$1" = "/bus" ] && [ -n "$2" ] && [ -n "$3" ] && [ -n "$4" ] && [ -z "$5" ] && printf '%s' "$4" | grep -qE '^[0-9]+$'; then
-    pslug="$2"; pproj="$3"; pprio="$4"
+    pproj="$2"; pslug="$3"; pprio="$4"   # ORDEM: PROJETO primeiro (v0.7.0)
     if [ "$pproj" = "default" ]; then proot="$base"; else proot="$base/$pproj"; fi
     mkdir -p "$proot"; pf="$proot/.priority"; tmp="$pf.$$.tmp"
     : > "$tmp"

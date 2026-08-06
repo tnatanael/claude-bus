@@ -101,7 +101,7 @@ try {
         BusLog $baseM $sid $pp[0] 'op-message'
         [Console]::Error.WriteLine('BUS: mensagem enfileirada para ' + $pp[0] + ' (' + $pp[1] + ') -- sera processada no proximo /bus.')
       } else {
-        [Console]::Error.WriteLine('BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <slug> [projeto] primeiro, depois /bus-message.')
+        [Console]::Error.WriteLine('BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <projeto> <slug> primeiro, depois /bus-message.')
       }
     } catch { [Console]::Error.WriteLine('BUS: erro ao enfileirar a mensagem -- ' + $_.Exception.Message) }
     exit 2
@@ -118,12 +118,13 @@ try {
   # chamada MANUAL do operador -> deve RODAR (acquire+run, serializado pelo lock), nao
   # deferir em inbox vazio. Distincao limpa entre auto-recheck e intencao explicita.
   $isManual = ($prompt -match '(?im)^\s*/bus\s+\S')
-  # Se traz prioridade (3o arg: /bus <slug> <projeto> <N>), grava em <projeto>/.priority
+  # Se traz prioridade (3o arg: /bus <projeto> <slug> <N>), grava em <projeto>/.priority
   # PRE-API -- assim um /bus manual com prioridade SEMPRE seta, mesmo que o gate defira
   # por lock depois. (O cron e bare, nunca manda prioridade.)
+  # ORDEM: PROJETO primeiro, slug depois (v0.7.0 -- era slug/projeto ate a 0.6.x).
   $pm = [regex]::Match($prompt, '(?im)^\s*/bus\s+(\S+)\s+(\S+)\s+(\d+)\s*$')
   if ($pm.Success) {
-    $pSlug = $pm.Groups[1].Value; $pProj = $pm.Groups[2].Value; $pPrio = $pm.Groups[3].Value
+    $pProj = $pm.Groups[1].Value; $pSlug = $pm.Groups[2].Value; $pPrio = $pm.Groups[3].Value
     try {
       $pRoot = if ($pProj -and $pProj -ne 'default') { Join-Path $base $pProj } else { $base }
       New-Item -ItemType Directory -Force -Path $pRoot | Out-Null

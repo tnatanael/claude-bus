@@ -370,7 +370,7 @@ const SHUTDOWN_BODY = [
   '3. Libere o lock e encerre o turno em silencio.',
   '',
   'Esta e a UNICA excecao a doutrina "mantenha o fio vivo": aqui o ciclo termina de proposito.',
-  'Para religar, o operador roda /bus <slug> <projeto> nesta sessao.'
+  'Para religar, o operador roda /bus <projeto> <slug> nesta sessao.'
 ].join('\r\n');
 
 // Le o .bus-secret do projeto. NAO cria (o dashboard nao inventa estado): sem secret,

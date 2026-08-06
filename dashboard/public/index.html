@@ -1153,7 +1153,7 @@ document.getElementById("pauseBtn").addEventListener("click", async (e) => {
 // Botao Desativar -> encerra o BUS do projeto SELECIONADO: o servidor enfileira um handoff
 // de encerramento pra cada especialista ATIVO (verde); cada um acorda uma vez, desarma o
 // proprio cron e para. Quem esta amarelo/vermelho NAO recebe nada (evita lixo no inbox).
-// Confirmacao obrigatoria: religar exige /bus <slug> <projeto> em cada sessao na mao.
+// Confirmacao obrigatoria: religar exige /bus <projeto> <slug> em cada sessao na mao.
 document.getElementById("offBtn").addEventListener("click", async (e) => {
   const off = e.currentTarget;
   const proj = off.dataset.project;
@@ -1164,7 +1164,7 @@ document.getElementById("offBtn").addEventListener("click", async (e) => {
             + "  " + green.join(", ") + "\n\n"
             + "Cada um acorda UMA vez, desarma o proprio cron e para.\n"
             + "Quem esta offline (amarelo/vermelho) nao recebe nada.\n\n"
-            + "Pra religar depois: /bus <slug> " + proj + " em cada sessao.";
+            + "Pra religar depois: /bus " + proj + " <slug> em cada sessao.";
   if (!window.confirm(msg)) return;
   off.disabled = true;
   try {

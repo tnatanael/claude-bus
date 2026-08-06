@@ -16,7 +16,7 @@ O texto após `/bus-message` é a **mensagem do operador** para o especialista *
    - Windows: `PS "$ROOT\bin\bus-name.ps1"`
    - macOS/Linux: `bash "$ROOT/bin/bus-name.sh"`
 
-   `NONE` → esta sessão nunca se registrou; peça pro operador rodar `/bus <slug> <projeto>` primeiro e pare.
+   `NONE` → esta sessão nunca se registrou; peça pro operador rodar `/bus <projeto> <slug>` primeiro e pare.
 2. **Escreva a mensagem** (todo o texto após `/bus-message`) num arquivo temp com a ferramenta **Write**.
 3. **Enfileire** como handoff do operador para você mesmo (**sem** `--reply`/`-ReplyRequired`):
    - Windows: `PS "$ROOT\bin\bus-send.ps1" -To <seu-slug> -From operador -Project <seu-projeto> -BodyFile "<caminho>"`
