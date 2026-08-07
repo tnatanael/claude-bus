@@ -32,9 +32,8 @@ const BUS_ROOT = process.env.CLAUDE_BUS_ROOT
       : '/tmp/claude-bus');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];
-const DONE_MAX_AGE_SEC = 24 * 3600; // done view: hide handoffs older than 24h
-const DONE_MAX_ITEMS = 20;          // done view: cap to the most recent N (newest first)
+const HANDOFF_FOLDERS = ['inbox', 'processing', 'done', 'rejected'];  // pastas no disco (thread le as 4)
+const VIEW_FOLDERS = ['inbox', 'processing', 'rejected'];             // colunas do board (done saiu na v0.7.1)
 // Frescor do seen -> cor do chip. Cron */5: um especialista saudavel tica a cada ~5min.
 // verde < 6min; amarelo 6-10min (perdeu ~1 ciclo); vermelho > 10min OU nunca visto (offline).
 // Quem SEGURA o lock (trabalhando) e promovido a verde depois (markWorking): num turno longo
@@ -109,21 +108,14 @@ function parseHandoffHeader(text) {
   return out;
 }
 
-function readHandoffs(folder, root, limit) {
+// PERF (historico, vale a licao): ler+parsear TODO arquivo de uma pasta que CRESCE (o done/ chega
+// a milhares) a cada poll de 1.5s gera muito garbage e degrada o Node ao longo de HORAS (GC
+// crescente). Por isso o done deixou de ser lido: a coluna saiu e so a contagem por nome ficou.
+// As pastas lidas aqui (inbox/processing/rejected) sao naturalmente pequenas -- se alguma passar
+// a crescer sem limite, aplique o mesmo tratamento (ordenar NOMES pelo id, ler so os N mais novos).
+function readHandoffs(folder, root) {
   const dir = path.join(root || BUS_ROOT, folder);
-  let names = safeReaddir(dir).filter(f => f.endsWith('.handoff'));
-  // PERF: o done/ acumula MILHARES de handoffs. Ler+parsear TODO arquivo a cada poll (1.5s) gera
-  // muito garbage e degrada o Node ao longo de HORAS (GC crescente -> /api/state e o switch ficam
-  // lentos). Quando o chamador so precisa dos N mais novos (a view do done, cap 20), ordena os
-  // NOMES pelo id (prefixo de timestamp YYYYMMDD-HHMMSS, extraido SEM ler o arquivo) e le so os N
-  // -> I/O e alocacao CONSTANTES, nao crescem com o tamanho do done/.
-  if (limit && names.length > limit) {
-    names = names
-      .map(f => ({ f, id: (parseHandoffFilename(f) || {}).id || '' }))
-      .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))   // mais novo primeiro
-      .slice(0, limit)
-      .map(x => x.f);
-  }
+  const names = safeReaddir(dir).filter(f => f.endsWith('.handoff'));
   const items = [];
   for (const f of names) {
     const fromName = parseHandoffFilename(f);
@@ -197,33 +189,22 @@ function buildThread(root, targetId) {
   return thread.map(it => Object.assign({ isTarget: it.id === targetId }, it));
 }
 
-// Timestamp prefix of a handoff id (YYYYMMDD-HHMMSS-xxxxxx) -> epoch seconds (local
-// time, matching how the sender stamps it). null if it doesn't parse.
-function idToEpochSec(id) {
-  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id || '');
-  if (!m) return null;
-  return Math.floor(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() / 1000);
-}
-
 function buildState(root) {
   root = root || BUS_ROOT;
   const now = Math.floor(Date.now() / 1000);
   const handoffs = {};
   const counts = {};
-  for (const folder of HANDOFF_FOLDERS) {
-    // done: le so os N mais novos (a view mostra 20) -> nao le os milhares do done/ a cada poll.
-    let items = readHandoffs(folder, root, folder === 'done' ? DONE_MAX_ITEMS : undefined);
-    if (folder === 'done') {
-      // Self-cleaning VIEW (the BUS on disk is never touched -- read-only boundary):
-      // show only the last 24h, newest first, capped to the most recent 20.
-      const cutoff = now - DONE_MAX_AGE_SEC;
-      items = items
-        .filter(it => { const t = idToEpochSec(it.id); return t === null || t >= cutoff; })
-        .slice(0, DONE_MAX_ITEMS);
-    }
+  for (const folder of VIEW_FOLDERS) {
+    const items = readHandoffs(folder, root);
     handoffs[folder] = items;
     counts[folder] = items.length;
   }
+  // done: a COLUNA foi removida (v0.7.1 -- nao agregava valor). Nenhum arquivo do done/ e lido
+  // no poll: so a CONTAGEM dos nomes (readdir, sem abrir arquivo). De quebra o numero ficou
+  // certo -- antes era o total CAPADO em 20 (o que a view mostrava), nao o total real.
+  // O done segue visivel no THREAD de um card (readAllForThread le as 4 pastas) -- so a coluna saiu.
+  handoffs.done = [];
+  counts.done = safeReaddir(path.join(root, 'done')).filter(f => f.endsWith('.handoff')).length;
   return {
     now,
     busRoot: root,

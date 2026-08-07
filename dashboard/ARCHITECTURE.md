@@ -7,8 +7,7 @@ serve a API JSON e o `public/index.html` estático.
 ## SAFETY BOUNDARY (inegociável)
 O dashboard é **READ ONLY** sobre os handoffs existentes: nunca move, altera ou apaga um
 handoff que já está no BUS — só lê (`readdirSync` / `readFileSync` / `statSync`). Guard de
-path traversal. A coluna `done` é filtrada **só na exibição** (últimas 24h, máx 20), o disco
-nunca é alterado.
+path traversal.
 
 **Escritas permitidas** (todas por clique explícito do operador, nunca automáticas, e todas
 com o nome do projeto validado contra `^[a-zA-Z0-9_-]+$` e `project=all` rejeitado):
@@ -68,7 +67,11 @@ Sempre inclui `default`.
 **`holder`** (top-level, global — vale pros dois formatos): quem segura o **lock de concorrência** (`<base>/.bus-lock`, 1 por máquina; o limite de API é da conta, não do projeto) agora — `{ slug, project, since, expiry }`, ou `null` se livre/expirado. O `expiry` é o lease (auto-libera se a sessão cair).
 Cada handoff: `{ id, from, to, replyRequired, inReplyTo }`, parseado do nome do arquivo
 `to-<to>__from-<from>__<id>.handoff` e do cabeçalho do corpo. Ordem: mais novo primeiro
-(o `id` é `YYYYMMDD-HHMMSS-xxxxxx`). O `done` já vem filtrado (24h, máx 20).
+(o `id` é `YYYYMMDD-HHMMSS-xxxxxx`). **`handoffs.done` vem sempre `[]`** — a coluna Done foi
+removida na v0.7.1 (não agregava valor) e o servidor **não lê mais nenhum arquivo do `done/`**
+no poll; só conta os nomes, então **`counts.done` agora é o total REAL** no disco (antes era o
+número **capado em 20** que a view mostrava). O histórico do `done` continua acessível no
+**thread** de um card (o `readAllForThread` lê as 4 pastas).
 
 ### `GET /api/events?project=<p|all>`  (SSE, opcional)
 `text/event-stream`: emite `data: <mesmo JSON do /api/state>` quando o estado muda, mais

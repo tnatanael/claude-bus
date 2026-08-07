@@ -218,7 +218,7 @@
 
   .flow {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);   /* Inbox | Processing (a coluna Done saiu na v0.7.1) */
     gap: 14px;
   }
   @media (max-width: 700px) { .flow { grid-template-columns: 1fr; } }
@@ -242,16 +242,13 @@
   .column h3 .arrow { color: var(--border); }
   .column.inbox h3 { color: var(--blue); }
   .column.processing h3 { color: var(--amber); }
-  .column.done h3 { color: var(--green); }
   /* faixa de cor no topo + leve tint por status (reforca o "zoneamento" de cor) */
   .column.inbox { border-top: 2px solid rgba(56,139,253,.55); background: linear-gradient(rgba(56,139,253,.06), rgba(56,139,253,0) 80px), var(--panel); }
   .column.processing { border-top: 2px solid rgba(210,153,34,.55); background: linear-gradient(rgba(210,153,34,.06), rgba(210,153,34,0) 80px), var(--panel); }
-  .column.done { border-top: 2px solid rgba(46,160,67,.5); background: linear-gradient(rgba(46,160,67,.05), rgba(46,160,67,0) 80px), var(--panel); }
   /* count como pilula colorida por status */
   .column h3 .count { padding: 0 7px; border-radius: 10px; font-size: 11px; background: rgba(255,255,255,.06); }
   .column.inbox h3 .count { background: rgba(56,139,253,.2); }
   .column.processing h3 .count { background: rgba(210,153,34,.2); }
-  .column.done h3 .count { background: rgba(46,160,67,.2); }
 
   .handoff {
     position: relative;
@@ -266,7 +263,6 @@
     z-index: 6;
   }
   .column.processing .handoff { border-left-color: var(--amber); }
-  .column.done .handoff { border-left-color: var(--green); }
   .handoff.linkable { cursor: pointer; }
   .cancel-op { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; padding: 0; line-height: 16px; text-align: center; border-radius: 4px; border: 1px solid rgba(248,81,73,0.4); background: rgba(248,81,73,0.12); color: #f85149; font-size: 11px; font-family: inherit; cursor: pointer; opacity: 0.55; z-index: 2; }
   .cancel-op:hover { opacity: 1; background: rgba(248,81,73,0.28); }
@@ -446,12 +442,8 @@
           <div id="inbox"></div>
         </div>
         <div class="column processing">
-          <h3>Processing <span class="arrow">▸</span></h3>
+          <h3>Processing</h3>
           <div id="processing"></div>
-        </div>
-        <div class="column done">
-          <h3>Done</h3>
-          <div id="done"></div>
         </div>
       </div>
 
@@ -526,11 +518,6 @@ function mockState() {
       processing: [
         { id: "20260617-132901-aa1234", from: "po", to: "backend", replyRequired: true, inReplyTo: "", toPrio: 1000 }
       ],
-      done: [
-        { id: "20260617-132752-5bc55a", from: "architect", to: "po", replyRequired: true, inReplyTo: "", toPrio: 0 },
-        { id: "20260617-132218-a02fcc", from: "frontend", to: "architect", replyRequired: false, inReplyTo: "20260617-132133-d3da33", toPrio: 1000 },
-        { id: "20260617-132133-d3da33", from: "architect", to: "frontend", replyRequired: true, inReplyTo: "", toPrio: 1000 }
-      ],
       rejected: []
     },
     counts: { inbox: 1, processing: 1, done: 3, rejected: 0 }
@@ -578,7 +565,7 @@ function shortId(id) {
 // Set of every handoff id currently on the board, so we know which replies can be linked.
 function buildIdSet(h) {
   const set = new Set();
-  ["inbox", "processing", "done", "rejected"].forEach(k =>
+  ["inbox", "processing", "rejected"].forEach(k =>
     (h[k] || []).forEach(it => set.add(it.id)));
   return set;
 }
@@ -785,7 +772,6 @@ function renderAll(projects) {
       <div class="flow proj-flow">
         ${col('Inbox', sortInboxByWait(h.inbox), 'inbox', p.project)}
         ${col('Processing', h.processing, 'processing', p.project)}
-        ${col('Done', h.done, 'done', p.project)}
       </div>`;
   }).join("");
 }
@@ -843,7 +829,7 @@ function drawConnectors() {
     let cx, px, c1x, c2x;
     if (Math.abs(pCx - cCx) < 6) {
       // same column: anchor both on the LEFT edge and bow into the gutter to the left.
-      // (Bowing right would run off-screen for the rightmost 'done' column, which is
+      // (Bowing right would run off-screen for the rightmost column, which is
       // where most reply<->parent pairs live.) Clamp so it never leaves the area.
       cx = c.left - a.left;
       px = p.left - a.left;
@@ -920,7 +906,6 @@ function renderHandoffs(h, proj) {
   const idSet = buildIdSet(h);
   renderColumn("inbox", sortInboxByWait(h.inbox), idSet, proj);
   renderColumn("processing", h.processing, idSet, proj);
-  renderColumn("done", h.done, idSet, proj);
   renderRejected(h.rejected, idSet, proj);
   drawConnectors();
   // reapply hover if the hovered card still exists after the rebuild
@@ -990,7 +975,7 @@ function render(state) {
     all.style.display = "";
     setBusRoot("(todos os projetos)");
     const sig = "ALL|" + JSON.stringify((state.projects || []).map(p =>
-      [p.project, (p.specialists || []).map(s => s.slug + ":" + s.status + ":" + (s.prio == null ? 1000 : s.prio)), ["inbox","processing","done","rejected"].map(k =>
+      [p.project, (p.specialists || []).map(s => s.slug + ":" + s.status + ":" + (s.prio == null ? 1000 : s.prio)), ["inbox","processing","rejected"].map(k =>
         (k === "inbox" ? sortInboxByWait(p.handoffs[k] || []) : (p.handoffs[k] || [])).map(it => it.id + "|" + (it.toStatus || "")).join(","))]));
     if (sig !== lastHandoffSig) { lastHandoffSig = sig; renderAll(state.projects || []); }
     updateEtas();
@@ -1006,10 +991,10 @@ function render(state) {
   if (sp) sp.textContent = state.project ? ("· " + state.project) : "";
   const ss = document.getElementById("singleSpecs");
   if (ss) ss.innerHTML = '<span class="next-check"></span> <span class="specs-label">especialistas:</span> ' + specsHtml(state.specialists);
-  const h = state.handoffs || { inbox: [], processing: [], done: [], rejected: [] };
+  const h = state.handoffs || { inbox: [], processing: [], rejected: [] };
   // a ORDEM (prioridade + espera) entra na assinatura -> re-ordena se a prioridade mudar.
   const inboxOrder = sortInboxByWait(h.inbox || []).map(it => it.id).join(",");
-  const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "done", "rejected"].map(k =>
+  const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "rejected"].map(k =>
     (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}|${it.toStatus || ""}|${it.toPrio == null ? "" : it.toPrio}`)));
   if (sig !== lastHandoffSig) {
     lastHandoffSig = sig;
