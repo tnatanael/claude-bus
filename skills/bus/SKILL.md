@@ -48,6 +48,8 @@ Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (a
    BUS_ID=<id — use no -InReplyTo>
    BUS_REPLY_REQUIRED=<true|false>
    BUS_IN_REPLY_TO=<id>         (só se for um retorno)
+   BUS_THREAD_DEPTH=<n>         (handoffs trocados com esse remetente nas últimas 24h)
+   BUS_THREAD_ALERT=<peer>:<n>  (só se n≥8 — pare de aprofundar essa frente: §5 Proporcionalidade)
    BUS_BODY_BEGIN
    <corpo, já limpo — sem header nem marcadores>
    BUS_BODY_END
@@ -94,7 +96,27 @@ O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2
 - **Quem origina, coordena.** Acompanhe, cobre os retornos, integre, encerre.
 - **Peer-to-peer** (dentro do projeto). Sem maestro central.
 - **Não assuma frente alheia.** No máximo observe/valide e informe o operador. Conflitos sobem pro operador.
-- **Output pro operador: o mínimo.** O operador não lê o chat de cada especialista — fale o **mínimo** (no máximo 1 linha, ou nada); não anuncie despacho nem narre a mecânica. Resumo detalhado é sob demanda (e, havendo controlador, é papel dele).
+- **Output pro operador: o mínimo.** O operador não lê o chat de cada especialista — fale o **mínimo** (no máximo 1 linha, ou nada); não anuncie despacho nem narre a mecânica. Resumo detalhado é sob demanda (e, havendo controlador, é papel dele). **Exceção obrigatória:** o pedido de alinhamento da *Proporcionalidade* (`BUS_THREAD_ALERT`) — esse você **fala**, e não em 1 linha.
+
+### ⚖️ Proporcionalidade — quando PARAR de aprofundar uma frente
+**Insistir fundo numa frente é decisão do OPERADOR (ou do controlador prio 0) — não sua.** Um loop de investigação entre 2–3 especialistas é **invisível de dentro**: cada rodada acha algo real e é localmente correta, mas o **agregado** pode consumir o bus inteiro num defeito que não muda nada pro usuário. Como ninguém vê o agregado, o gatilho é **MEDIDO, não sentido**:
+
+- O `bus-inbox` devolve **`BUS_THREAD_DEPTH=<n>`** em cada handoff = quantos handoffs **você e o remetente** trocaram nas **últimas 24 h**. Em **n ≥ 8** ele emite também **`BUS_THREAD_ALERT=`**.
+- **Viu o alerta? PARE de aprofundar ESSA frente** — não abra nova rodada de hipótese / teste / investigação nela. Feche o que está na mão, devolva o apurado e **peça alinhamento**.
+- **Quem pede:** o **dono da frente** (quem a originou). **Não é sua?** Pare de aprofundar do mesmo jeito, devolva o que apurou dizendo **em 1 linha** que o limiar foi cruzado, e deixe o pedido com o dono — **não escalone em duplicidade**.
+
+**Como pedir — uma vez, curto:** ao **operador no seu output** e, havendo **controlador (prio 0)**, também por handoff. Só isto:
+1. **onde a frente chegou** (o que já está estabelecido, 1–3 linhas);
+2. **o impacto real no usuário** se ela for até o fim — **se for zero, diga "zero"**;
+3. **o que deixa de ser feito** enquanto ela continua (sua fila parada, quem está ocioso);
+4. a pergunta: **continuo, adio ou encerro?**
+
+**Isto NÃO viola as regras acima — é a exceção explícita a elas:**
+- **não é "estacionar" nem ficar dormente:** você **segue processando todo o resto do inbox** normalmente — pausa **uma frente**, não a sessão;
+- **não viola o "output pro operador: o mínimo":** aqui falar é **obrigatório** — o operador só descobre o loop se **você** contar;
+- **não abandona o "quem origina, coordena":** coordenar inclui saber a hora de **devolver a decisão de escopo** a quem enxerga o retrato inteiro.
+
+⚠️ `BUS_FROM=operador` **nunca** dispara isto (instrução do operador não é frente em loop). O limiar (8) mora aqui **e** no `bus-inbox` — mudou um, mude o outro.
 
 ### ⚠️ Mantenha o fio vivo — a decisão do "posso encerrar?"
 **Você NUNCA pausa a SUA própria entrega esperando o operador** — ele não itera a sua frente nem te manda "continua". **Proibido, sem exceção:**
@@ -102,7 +124,7 @@ O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2
 - ❌ **Ficar "dormente"/"stand-down" esperando o operador retomar o SEU trabalho.** Ninguém te acorda pra isso — o cron só dispara com **handoff no inbox**. Fio parado = **bus travado**.
 - ❌ **Fatiar a SUA entrega em "passadas" que dependem de você ser re-chamado na mão.** É seu e continua? Ou **faça agora**, ou **self-handoff** (que te re-acorda sozinho). O operador **não é um passo** do seu fluxo.
 
-🛑 **Única exceção a TUDO nesta seção — `BUS-SHUTDOWN`:** handoff do `operador` cujo corpo começa com `BUS-SHUTDOWN` = ele clicou *Desativar* no dashboard e encerrou o BUS do projeto. Aí parar **é** o certo: desarme o cron, **não re-arme**, não mande retorno nem despedida, encerre (passo 7, exceção). Não percorra a decisão abaixo.
+🛑 **Única coisa que ENCERRA o fio de propósito — `BUS-SHUTDOWN`** (a *Proporcionalidade* acima não encerra nada: lá você continua trabalhando, só para de aprofundar UMA frente)**:** handoff do `operador` cujo corpo começa com `BUS-SHUTDOWN` = ele clicou *Desativar* no dashboard e encerrou o BUS do projeto. Aí parar **é** o certo: desarme o cron, **não re-arme**, não mande retorno nem despedida, encerre (passo 7, exceção). Não percorra a decisão abaixo.
 
 O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de encerrar, **percorra esta decisão** — e só pare no fim dela:
 1. **Tenho passos do meu plano que NÃO dependem de terceiros?** → **faça-os agora**, neste turno (não fatie o seu trabalho em tiques).

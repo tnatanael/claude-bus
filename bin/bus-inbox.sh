@@ -63,6 +63,34 @@ if [ ! -f "$secret_file" ]; then
 fi
 secret="$(tr -d ' \r\n' < "$secret_file")"
 
+# --- PROFUNDIDADE DA FRENTE (BUS_THREAD_DEPTH) ------------------------------------------
+# Par do .ps1. POR QUE: um loop de investigacao entre 2-3 especialistas e INVISIVEL de dentro --
+# cada rodada e localmente correta, mas o agregado vira desperdicio (caso real: 106 handoffs,
+# 77% do trafego do dia, num defeito de impacto ZERO pro usuario). COMO: conta quantos handoffs
+# os DOIS slugs trocaram nas ULTIMAS 24H nas 4 pastas, lendo SO O NOME (nao abre arquivo -- o
+# done/ tem milhares). Limiar espelhado no SS5.1 da SKILL: mudou aqui, mude la.
+THREAD_ALERT_AT=8
+cut_ts="$(date -d '24 hours ago' '+%Y%m%d-%H%M%S' 2>/dev/null || date -v-24H '+%Y%m%d-%H%M%S' 2>/dev/null || echo '00000000-000000')"
+pair_depth() {   # $1 = peer -> imprime quantos handoffs voce e ele trocaram nas ultimas 24h
+  peer="$1"; n=0
+  for fold in inbox processing done rejected; do
+    for pf in "$bus_root/$fold"/to-*.handoff; do
+      [ -e "$pf" ] || continue
+      pbn="$(basename "$pf")"
+      pto="${pbn#to-}"; pto="${pto%%__*}"
+      prest="${pbn#*__from-}"; pfrom="${prest%%__*}"
+      pid="${prest#*__}"; pts="${pid%%-*}-$(printf '%s' "${pid#*-}" | cut -c1-6)"
+      case "$pto|$pfrom" in
+        "$me|$peer"|"$peer|$me") ;;
+        *) continue;;
+      esac
+      [ "$pts" \< "$cut_ts" ] && continue          # fora da janela de 24h
+      n=$((n+1))
+    done
+  done
+  echo "$n"
+}
+
 found=0
 for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   [ -e "$hit" ] || continue
@@ -88,6 +116,13 @@ for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   echo "BUS_ID=$hid"
   echo "BUS_REPLY_REQUIRED=$hrr"
   [ -n "$hirt" ] && echo "BUS_IN_REPLY_TO=$hirt"
+  depth="$(pair_depth "$hfrom")"
+  [ -z "$depth" ] || [ "$depth" -lt 1 ] 2>/dev/null && depth=1
+  echo "BUS_THREAD_DEPTH=$depth"
+  # ALERTA so em frente entre ESPECIALISTAS (instrucao do operador nao e frente em loop).
+  if [ "$hfrom" != "operador" ] && [ "$depth" -ge "$THREAD_ALERT_AT" ] 2>/dev/null; then
+    echo "BUS_THREAD_ALERT=$hfrom:$depth -- PARE de aprofundar esta frente e peca alinhamento (SKILL SS5.1)"
+  fi
   echo "BUS_BODY_BEGIN"
   printf '%s\n' "$body"
   echo "BUS_BODY_END"
