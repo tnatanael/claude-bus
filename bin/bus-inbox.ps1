@@ -80,39 +80,9 @@ New-Item -ItemType Directory -Force -Path $inbox | Out-Null
 $secret = Get-BusSecret $BusRoot
 $prefix = 'to-' + $Me + '__'
 
-# --- PROFUNDIDADE DA FRENTE (BUS_THREAD_DEPTH) ------------------------------------------
-# POR QUE existe: um loop de investigacao entre 2-3 especialistas e INVISIVEL de dentro. Cada
-# rodada e localmente correta (acha algo real), mas o AGREGADO vira desperdicio -- num caso real
-# 3 especialistas gastaram 106 handoffs (77% do trafego do dia) num defeito de impacto ZERO pro
-# usuario, e ninguem percebeu porque nenhuma sessao ve o agregado. Este numero da esse olho.
-# COMO: conta quantos handoffs os DOIS slugs (voce e quem enviou, em qualquer direcao) trocaram
-# nas ULTIMAS 24H, nas 4 pastas. Le SO O NOME do arquivo (to-/from-/timestamp do id) -- nao abre
-# nenhum arquivo, entao nao paga o preco do done/ com milhares de itens.
-# O limiar (SS5.1 da SKILL) mora nos dois lugares -- se mudar um, mude o outro.
-$THREAD_ALERT_AT = 8
-function Get-PairDepthMap([string]$root) {
-  $map = @{}
-  $cut = (Get-Date).AddHours(-24)
-  $ci  = [System.Globalization.CultureInfo]::InvariantCulture
-  foreach ($folder in @('inbox','processing','done','rejected')) {
-    foreach ($n in (Get-ChildItem -LiteralPath (Join-Path $root $folder) -File -Filter '*.handoff' -ErrorAction SilentlyContinue)) {
-      if ($n.Name -notmatch '^to-(.+?)__from-(.+?)__(\d{8}-\d{6})') { continue }
-      $a = $matches[1]; $b = $matches[2]; $ts = $matches[3]
-      $dt = [datetime]::MinValue
-      if (-not [datetime]::TryParseExact($ts, 'yyyyMMdd-HHmmss', $ci, [System.Globalization.DateTimeStyles]::None, [ref]$dt)) { continue }
-      if ($dt -lt $cut) { continue }
-      $key = (@($a, $b) | Sort-Object) -join '|'
-      if ($map.ContainsKey($key)) { $map[$key] = $map[$key] + 1 } else { $map[$key] = 1 }
-    }
-  }
-  return $map
-}
-
 $hits = Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.handoff' -and $_.Name.StartsWith($prefix) } |
         Sort-Object LastWriteTime
-$pairDepth = @{}
-if ($hits) { $pairDepth = Get-PairDepthMap $BusRoot }   # so calcula se ha o que entregar
 $found = 0
 foreach ($hit in $hits) {
   $raw = Get-Content -LiteralPath $hit.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
@@ -141,14 +111,6 @@ foreach ($hit in $hits) {
   Write-Output ('BUS_ID=' + $hId)
   Write-Output ('BUS_REPLY_REQUIRED=' + $hRR)
   if ($hIRT) { Write-Output ('BUS_IN_REPLY_TO=' + $hIRT) }
-  # Quantos handoffs voce e o remetente trocaram nas ultimas 24h (ver bloco acima).
-  $pk = (@($Me, $hFrom) | Sort-Object) -join '|'
-  $depth = if ($pairDepth.ContainsKey($pk)) { $pairDepth[$pk] } else { 1 }
-  Write-Output ('BUS_THREAD_DEPTH=' + $depth)
-  # ALERTA so em frente entre ESPECIALISTAS (instrucao do operador nao e frente em loop).
-  if ($hFrom -ne 'operador' -and $depth -ge $THREAD_ALERT_AT) {
-    Write-Output ('BUS_THREAD_ALERT=' + $hFrom + ':' + $depth + ' -- PARE de aprofundar esta frente e peca alinhamento (SKILL SS5.1)')
-  }
   Write-Output 'BUS_BODY_BEGIN'
   Write-Output $body
   Write-Output 'BUS_BODY_END'
