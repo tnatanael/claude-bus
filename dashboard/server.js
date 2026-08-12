@@ -42,12 +42,16 @@ const VIEW_FOLDERS = ['inbox', 'processing', 'rejected'];             // colunas
 // a cada N min -> seen ate ~N + jitter. verde <= ~1.5N (+jitter, ticou dentro de ~1 ciclo);
 // amarelo <= ~2.5N (perdeu ~1 ciclo); vermelho > isso ou nunca visto. (Antes era fixo 6/10min,
 // entao com check de 15min todo mundo aparecia offline.) Holder do lock -> verde (markWorking).
+// PISO (v0.7.5): so escalar pelo N nao basta quando o N e pequeno. Com o cron em */1 o limiar
+// viraria 3min -- e o cron NAO dispara com o REPL ocupado, entao qualquer turno de 4min pintaria
+// o chip de amarelo sem nada estar errado. O piso (10/15min) mantem a escala pra N grande e
+// impede o chip de piscar com N pequeno. Offline de verdade e MUITO maior que isso.
 function seenStatus(ageSec, intervalSec) {
   if (ageSec == null) return 'red';
   const N = (intervalSec && intervalSec > 0) ? intervalSec : 300;   // fallback 5min
   const jitter = 90;                                                // margem p/ o jitter do harness
-  if (ageSec <= N * 1.5 + jitter) return 'green';
-  if (ageSec <= N * 2.5 + jitter) return 'yellow';
+  if (ageSec <= Math.max(N * 1.5 + jitter, 600)) return 'green';    // piso 10min
+  if (ageSec <= Math.max(N * 2.5 + jitter, 900)) return 'yellow';   // piso 15min
   return 'red';
 }
 
