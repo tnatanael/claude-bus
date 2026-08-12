@@ -4,10 +4,10 @@
 # serializa DENTRO do projeto; projetos diferentes rodam em PARALELO. Tambem intercepta
 # /bus-message (enfileira instrucao do operador SEM acordar o modelo) e a PAUSA por projeto.
 # Regras (so para prompt que comeca com /bus; o resto passa direto):
-#   - lock global tomado por OUTRA sessao (fresco)         -> exit 2 (defer, custo 0)
+#   - lock global tomado por OUTRA sessao (fresco)         -> BLOQUEIA (defer, custo 0)
 #   - inbox tem handoff pendente pra mim                   -> acquire lock + exit 0
 #   - inbox vazia e seen velho (>3h, possivel pos-restart) -> exit 0 (deixa re-armar o cron)
-#   - inbox vazia e seen fresco                            -> exit 2 (skip de graca)
+#   - inbox vazia e seen fresco                            -> BLOQUEIA (skip de graca)
 # Sempre regrava seen/<sid> (prova de vida pro dashboard). Fail-open: erro -> exit 0.
 # O acquire do lock e ATOMICO (noclobber/O_EXCL, par do CreateNew/FileShare.None do .ps1).
 # Demais partes best-effort no Unix -- validar (parsing JSON via sed assume prompts simples;
@@ -18,6 +18,20 @@ LEASE_MIN=60      # auto-libera o lock se a sessao travar/cair (o dashboard most
 # Forense: acquire/steal/defer-race vao pra <base>/.bus-gate.log (best-effort, nunca quebra).
 # (Bash nao tem o fail-open por-excecao do .ps1: aqui um erro nao vira "exit 0 sem lock" -- o
 # fluxo so segue, e o acquire ja e atomico via noclobber. Logo nao ha catch a blindar.)
+bus_block() {   # $1 = mensagem OPCIONAL (vai no stopReason)
+  # BLOQUEIA o prompt sem sujar a conversa. Par do BusBlock do .ps1. Medido no app 2026-08-12:
+  # exit 2 gera card PERMANENTE (com a linha de comando); {"continue":false} so um aviso
+  # TRANSITORIO. Os dois bloqueiam igual -- custo ZERO de API (o modelo NAO acorda).
+  # Com mensagem = aviso com texto (so onde o operador espera retorno); sem = mudo.
+  if [ -n "${1:-}" ]; then
+    m=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"continue":false,"stopReason":"%s"}\n' "$m"
+  else
+    printf '{"continue":false}\n'
+  fi
+  exit 0
+}
+
 buslog() {  # $1=base $2=sid $3=slug $4=decision
   lf="$1/.bus-gate.log"
   { [ -f "$lf" ] && [ "$(wc -c < "$lf" 2>/dev/null || echo 0)" -gt 524288 ] && : > "$lf"; } 2>/dev/null
@@ -55,17 +69,17 @@ main() {
   sid="$(printf '%s' "$raw" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
 
   # 0. /bus-message <texto>: o operador enfileira uma instrucao pro proprio especialista da
-  # sessao. O HOOK escreve o handoff (operador->slug) e BLOQUEIA (exit 2) -> NAO acorda o modelo,
+  # sessao. O HOOK escreve o handoff (operador->slug) e BLOQUEIA (bus_block) -> NAO acorda o modelo,
   # custo ZERO. (O parsing de JSON aqui e simples -- mensagem de 1 linha; o par .ps1 aceita multi.)
   if [[ "$prompt" =~ ^[[:space:]]*/bus-message[[:space:]]+(.+)$ ]]; then
     bm_msg="${BASH_REMATCH[1]}"
     bm_base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
     r="$(enqueue_op_message "$bm_base" "$sid" "$bm_msg")"
     case "$r" in
-      OK:*) pp="${r#OK:}"; ps="${pp%%:*}"; pj="${pp#*:}"; buslog "$bm_base" "$sid" "$ps" "op-message"; echo "BUS: mensagem enfileirada para $ps ($pj) -- sera processada no proximo /bus." >&2;;
-      *) echo "BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <projeto> <slug> primeiro, depois /bus-message." >&2;;
+      OK:*) pp="${r#OK:}"; ps="${pp%%:*}"; pj="${pp#*:}"; buslog "$bm_base" "$sid" "$ps" "op-message"; bus_block "BUS: mensagem enfileirada para $ps ($pj) -- sera processada no proximo /bus.";;
+      *) bus_block "BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <projeto> <slug> primeiro, depois /bus-message.";;
     esac
-    exit 2
+    bus_block
   fi
 
   # 1. so gateia /bus; qualquer outro prompt passa (fast-path)
@@ -137,7 +151,7 @@ main() {
   # /bus-message ja passaram antes daqui.
   if [ -e "$projroot/.bus-paused" ]; then
     buslog "$base" "$sid" "$slug" "defer-paused"
-    exit 2
+    bus_block
   fi
 
   # 3. lock POR PROJETO (<projeto>/.bus-lock): tomado por OUTRA sessao do MESMO projeto e fresco -> defer
@@ -147,7 +161,7 @@ main() {
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
     if [ -n "$lexp" ] && [ "$now" -lt "$lexp" ] && [ "$lsid" != "$sid" ]; then
       buslog "$base" "$sid" "$slug" "defer-lock>$lsid"
-      exit 2
+      bus_block
     fi
   fi
 
@@ -183,7 +197,7 @@ main() {
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
   if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
     buslog "$base" "$sid" "$slug" "defer-prio>$higherslug"
-    exit 2
+    bus_block
   fi
 
   if [ "$mypending" = "1" ]; then   # bare /bus com trabalho -> processa (serializado pelo lock)
@@ -204,13 +218,13 @@ main() {
       printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" acquire-steal; exit 0
     fi
     buslog "$base" "$sid" "$slug" defer-race
-    exit 2
+    bus_block
   fi
 
   # 5. inbox vazia -- so chega aqui o BARE /bus sem trabalho (manual/config ja saiu no 3b)
   if [ "$seen_age_min" -gt "$SEEN_STALE_MIN" ]; then exit 0; fi
   # SILENCIOSO: tick ocioso e o caso MAIS comum -- stderr aqui virava um card por tick no app.
-  exit 2
+  bus_block
 }
 main
 exit 0

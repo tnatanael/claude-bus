@@ -5,25 +5,44 @@
 # Tambem intercepta /bus-message (enfileira instrucao do operador SEM acordar o modelo).
 #
 # Regras (so para prompt que comeca com /bus; o resto passa direto):
-#   - lock global tomado por OUTRA sessao (fresco)        -> exit 2 (defer, custo 0)
+#   - lock global tomado por OUTRA sessao (fresco)        -> BLOQUEIA (defer, custo 0)
 #   - inbox tem handoff pendente pra mim                  -> acquire lock + exit 0 (trabalha)
 #   - inbox vazia e seen velho (>3h, possivel pos-restart)-> exit 0 (deixa re-armar o cron)
-#   - inbox vazia e seen fresco                           -> exit 2 (skip de graca)
+#   - inbox vazia e seen fresco                           -> BLOQUEIA (skip de graca)
 # Sempre regrava seen/<sid> (prova de vida pro dashboard, mesmo deferindo).
 # Fail-open BLINDADO: erro inesperado NAO trava prompt nao-/bus; mas pra /bus de sessao
 # conhecida, tenta ADQUIRIR o lock mesmo apos o erro -- se outro o segura (fresco) defere
 # (nao sobrepoe), senao adquire e passa COM o lock. Preserva o invariante mesmo sob falha.
 # Forense: acquire/steal/defer-race/fail-open vao pra <base>/.bus-gate.log (best-effort).
 #
-# DEFER SILENCIOSO (NAO reintroduzir stderr nos defers automaticos): todo exit 2 e renderizado
-# pelo app como um card "Um hook bloqueou seu prompt" com o texto do stderr. Como o tick ocioso
-# dispara a cada N min em CADA sessao, isso enchia a conversa de cards. Os defers AUTOMATICOS
-# (empty/lock/prio/race/paused) agora saem CALADOS -- o registro vive no .bus-gate.log e o
-# seen/<sid> prova que o tick rodou. Stderr SO nos caminhos que o operador acionou na mao
-# (/bus-message ok/erro), onde a resposta e esperada.
+# BLOQUEIO SEM CARD (NAO voltar pra exit 2): bloquear e obrigatorio -- e o que impede o wake do
+# modelo (custo zero). O que NAO e obrigatorio e o barulho. Todo `exit 2` vira um card PERMANENTE
+# no app ("Prompt bloqueado por um hook" + a linha de comando), e o tique ocioso dispara a cada
+# N min em CADA sessao -> a conversa enchia. Por isso todo bloqueio passa pelo BusBlock, que usa
+# {"continue":false} (aviso transitorio, sem rastro). Detalhe das 3 variantes medidas: ver BusBlock.
+# Regra de uso: mensagem no stopReason SO onde o operador acionou algo na mao e espera retorno
+# (/bus-message); defer automatico (empty/lock/prio/race/paused) e MUDO -- o rastro vive no
+# .bus-gate.log e o seen/<sid> prova que o tique rodou.
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
 $LEASE_MIN      = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
+
+function BusBlock([string]$msg) {
+  # BLOQUEIA o prompt sem sujar a conversa. MEDIDO no app em 2026-08-12 (3 variantes):
+  #   exit 2                                  -> card PERMANENTE ("Prompt bloqueado por um
+  #                                              hook" + a linha de comando do PowerShell);
+  #   {"decision":"block","reason":""}        -> linha recolhida, mas PERMANECE;
+  #   {"continue":false} (esta)               -> aviso TRANSITORIO, nao deixa rastro.
+  # Com $msg, o texto vai no stopReason e aparece nesse aviso ("Operation stopped by hook:
+  # <msg>") -- use SO onde o operador acionou algo na mao e espera retorno. Sem $msg = mudo.
+  # Os 3 bloqueiam igual (custo ZERO de API: o modelo NAO acorda).
+  try {
+    $o = @{ 'continue' = $false }
+    if ($msg) { $o['stopReason'] = $msg }
+    Write-Output ($o | ConvertTo-Json -Compress)
+    exit 0
+  } catch { exit 2 }   # se o JSON falhar, cai no exit 2: gera card, mas o bloqueio e garantido
+}
 
 function BusLog($base, $sid, $slug, $decision) {
   # append best-effort ao log forense; NUNCA lanca (logar nao pode afetar o gate).
@@ -99,12 +118,12 @@ try {
       if ($r -like 'OK:*') {
         $pp = $r.Substring(3) -split ':', 2
         BusLog $baseM $sid $pp[0] 'op-message'
-        [Console]::Error.WriteLine('BUS: mensagem enfileirada para ' + $pp[0] + ' (' + $pp[1] + ') -- sera processada no proximo /bus.')
+        BusBlock ('BUS: mensagem enfileirada para ' + $pp[0] + ' (' + $pp[1] + ') -- sera processada no proximo /bus.')
       } else {
-        [Console]::Error.WriteLine('BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <projeto> <slug> primeiro, depois /bus-message.')
+        BusBlock 'BUS: esta sessao ainda nao se registrou no BUS -- rode /bus <projeto> <slug> primeiro, depois /bus-message.'
       }
-    } catch { [Console]::Error.WriteLine('BUS: erro ao enfileirar a mensagem -- ' + $_.Exception.Message) }
-    exit 2
+    } catch { BusBlock ('BUS: erro ao enfileirar a mensagem -- ' + $_.Exception.Message) }
+    BusBlock $null
   }
 
   # 1. So gateia /bus. Qualquer outro prompt passa na hora (fast-path, custo ~0).
@@ -189,7 +208,7 @@ try {
   # /bus-message ja passaram antes daqui, entao seguem funcionando com o projeto pausado.
   if (Test-Path -LiteralPath (Join-Path $projRoot '.bus-paused')) {
     BusLog $base $sid $slug 'defer-paused'   # SILENCIOSO (ver nota no topo): so o log
-    exit 2
+    BusBlock $null
   }
 
   # 4. Lock POR PROJETO (<projeto>/.bus-lock): serializa DENTRO do projeto; projetos
@@ -202,7 +221,7 @@ try {
       $exp = [datetimeoffset]::Parse($L.expiry)
       if ($now -lt $exp -and $L.sid -ne $sid) {
         BusLog $base $sid $slug ("defer-lock>" + ([string]$L.slug))   # SILENCIOSO
-        exit 2
+        BusBlock $null
       }
     } catch {}   # lock corrompido/ilegivel -> trata como livre
   }
@@ -242,7 +261,7 @@ try {
   # -> processa por ultimo.)
   if ($myPending -and $higherPending) {
     BusLog $base $sid $slug ("defer-prio>" + $higherSlug)   # SILENCIOSO
-    exit 2
+    BusBlock $null
   }
 
   if ($myPending) {   # bare /bus com trabalho -> processa (serializado pelo lock)
@@ -264,12 +283,12 @@ try {
     }
     if ($acquired) { BusLog $base $sid $slug $how; exit 0 }
     BusLog $base $sid $slug 'defer-race'   # SILENCIOSO
-    exit 2
+    BusBlock $null
   }
 
   # 6. Inbox vazia -- so chega aqui o BARE /bus sem trabalho (manual/config ja saiu no passo 3b).
   if ($seenAgeMin -gt $SEEN_STALE_MIN) { exit 0 }   # gap > 3h -> deixa re-armar o cron
-  exit 2   # SILENCIOSO: tick ocioso e o caso MAIS comum -- stderr aqui virava um card por tick.
+  BusBlock $null   # SILENCIOSO: o tick ocioso e o caso MAIS comum -- e o que enchia a tela de card.
            # Prova de que o tick rodou = o mtime do seen/<sid> (o dashboard mostra).
 
 } catch {
@@ -295,7 +314,7 @@ try {
         } catch {}
       }
       if ($got) { BusLog $base2 $sid $slug 'failopen-acquire'; exit 0 }
-      BusLog $base2 $sid $slug 'failopen-defer'; exit 2
+      BusLog $base2 $sid $slug 'failopen-defer'; BusBlock $null
     }
   } catch {}
   BusLog $base2 $sid $slug 'failopen-pass'
