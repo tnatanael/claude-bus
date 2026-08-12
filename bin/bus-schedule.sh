@@ -59,22 +59,38 @@ SENDEOF
     echo "CREATED=$slug"; echo "DIR=$dir"; echo "CRON=$line"
     ;;
   list)
-    any=0
+    # ESCOPO DE PROJETO (par do .ps1): os agendamentos vivem num dir GLOBAL, mas cada um pertence
+    # a um projeto (no schedule.meta). Com --project lista SO os daquele projeto -- e o que o
+    # especialista enxerga, igual ao resto do BUS. Sem --project lista tudo (operador/debug).
+    any=0; ocultos=0
     if [ -d "$schedRoot" ]; then
       for d in "$schedRoot"/*/; do
         [ -f "${d}schedule.meta" ] || continue
-        any=1; s="$(basename "$d")"; mf="${d}schedule.meta"
+        s="$(basename "$d")"; mf="${d}schedule.meta"
         gg() { sed -n "s/^$1=//p" "$mf" | head -n1; }
+        if [ -n "$project" ] && [ "$(gg project)" != "$project" ]; then ocultos=$((ocultos+1)); continue; fi
+        any=1
         cad="$(gg cadence)"; [ "$cad" = "weekly" ] && cad="weekly $(gg days)"
         cl="$(crontab -l 2>/dev/null | grep "# bus-schedule:$s\$" || true)"
         echo "[$s] $(gg project) -> $(gg dest) | $cad @ $(gg time) | cron: ${cl:-(ausente!)}"
         [ -f "${d}send.log" ] && echo "    log: $(tail -n1 "${d}send.log")"
       done
     fi
-    [ "$any" = "0" ] && echo "(nenhum agendamento)"
+    if [ "$any" = "0" ]; then
+      if [ -n "$project" ]; then echo "(nenhum agendamento no projeto $project)"; else echo "(nenhum agendamento)"; fi
+    fi
+    [ "$ocultos" -gt 0 ] && echo "($ocultos agendamento(s) de OUTRO projeto omitido(s))"
     ;;
   remove)
     [ -n "$slug" ] || { echo "remove exige --slug" >&2; exit 1; }
+    # MESMO escopo do list: com --project so remove se o agendamento for DAQUELE projeto.
+    if [ -n "$project" ] && [ -f "$schedRoot/$slug/schedule.meta" ]; then
+      owner="$(sed -n 's/^project=//p' "$schedRoot/$slug/schedule.meta" | head -n1)"
+      if [ "$owner" != "$project" ]; then
+        echo "OUTRO_PROJETO=$owner -- nada removido (voce esta em $project)"
+        exit 0
+      fi
+    fi
     crontab -l 2>/dev/null | grep -v "# bus-schedule:$slug\$" | crontab - 2>/dev/null || true
     echo "CRON_REMOVED=$slug"
     dir="$schedRoot/$slug"

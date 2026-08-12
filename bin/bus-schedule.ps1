@@ -89,12 +89,19 @@ if ($Action -eq 'create') {
   if ($info) { Write-Output ("NEXT=" + $info.NextRunTime) }
 }
 elseif ($Action -eq 'list') {
-  $any = $false
+  # ESCOPO DE PROJETO: os agendamentos vivem num diretorio GLOBAL (~/.claude/bus-schedules),
+  # mas cada um pertence a um projeto (gravado no schedule.meta). Com -Project, lista SO os
+  # daquele projeto -- e o que o especialista enxerga, igual ao resto do BUS (ele so ve e
+  # endereca quem esta no mesmo projeto). Sem -Project, lista tudo (uso do operador/debug).
+  $any = $false; $ocultos = 0
   if (Test-Path -LiteralPath $schedRoot) {
     foreach ($d in (Get-ChildItem -LiteralPath $schedRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
       $mf = Join-Path $d.FullName 'schedule.meta'; if (-not (Test-Path $mf)) { continue }
-      $any = $true
       $m = @{}; foreach ($ln in (Get-Content $mf -Encoding UTF8)) { $kv = $ln -split '=', 2; if ($kv.Count -eq 2) { $m[$kv[0].Trim()] = $kv[1].Trim() } }
+      # Agendamento antigo, sem project no meta: nao da pra saber de quem e -> some quando
+      # filtrado (aparece so no list sem -Project, pra nao sumir do radar do operador).
+      if ($Project -ne '' -and $m['project'] -ne $Project) { $ocultos++; continue }
+      $any = $true
       $info = Get-ScheduledTaskInfo -TaskName (TaskName $d.Name) -TaskPath $taskFolder -ErrorAction SilentlyContinue
       $next = if ($info) { $info.NextRunTime } else { '(tarefa ausente!)' }
       $last = if ($info -and $info.LastRunTime) { "$($info.LastRunTime) exit=$($info.LastTaskResult)" } else { '-' }
@@ -104,10 +111,26 @@ elseif ($Action -eq 'list') {
       if (Test-Path $lf) { $t = Get-Content $lf -Tail 1 -ErrorAction SilentlyContinue; if ($t) { Write-Output ("    log: $t") } }
     }
   }
-  if (-not $any) { Write-Output '(nenhum agendamento)' }
+  if (-not $any) {
+    if ($Project -ne '') { Write-Output ("(nenhum agendamento no projeto " + $Project + ")") }
+    else { Write-Output '(nenhum agendamento)' }
+  }
+  if ($ocultos -gt 0) { Write-Output ("(" + $ocultos + " agendamento(s) de OUTRO projeto omitido(s))") }
 }
 elseif ($Action -eq 'remove') {
   if (-not $Slug) { throw 'remove exige -Slug' }
+  # MESMO escopo do list: com -Project, so remove se o agendamento for DAQUELE projeto. Sem
+  # isso um especialista apagaria o agendamento de outro projeto por colisao de nome de slug.
+  if ($Project -ne '') {
+    $mf = Join-Path (Join-Path $schedRoot $Slug) 'schedule.meta'
+    if (Test-Path -LiteralPath $mf) {
+      $mo = @{}; foreach ($ln in (Get-Content $mf -Encoding UTF8)) { $kv = $ln -split '=', 2; if ($kv.Count -eq 2) { $mo[$kv[0].Trim()] = $kv[1].Trim() } }
+      if ($mo['project'] -ne $Project) {
+        Write-Output ("OUTRO_PROJETO=" + $mo['project'] + " -- nada removido (voce esta em " + $Project + ")")
+        exit 0
+      }
+    }
+  }
   try { Unregister-ScheduledTask -TaskName (TaskName $Slug) -TaskPath $taskFolder -Confirm:$false -ErrorAction Stop; Write-Output ("TASK_REMOVED=" + (TaskName $Slug)) }
   catch { Write-Output ("TASK_AUSENTE=" + (TaskName $Slug)) }
   $dir = Join-Path $schedRoot $Slug

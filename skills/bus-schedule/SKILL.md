@@ -12,11 +12,15 @@ Agenda um handoff recorrente `operador→destino` no inbox do BUS. No disparo, u
 | Op | Windows | macOS / Linux |
 |---|---|---|
 | **criar** | `PS "$ROOT\bin\bus-schedule.ps1" -Action create -Slug <s> -Project <p> -Dest <d> -Cadence daily\|weekly [-Days Mon,Wed,Fri] -Time HH:mm -BodyFile <arq>` | `bash "$ROOT/bin/bus-schedule.sh" create --slug <s> --project <p> --dest <d> --cadence daily\|weekly [--days mon,wed,fri] --time HH:mm --body-file <arq>` |
-| **listar** | `PS "$ROOT\bin\bus-schedule.ps1" -Action list` | `bash "$ROOT/bin/bus-schedule.sh" list` |
-| **remover** | `PS "$ROOT\bin\bus-schedule.ps1" -Action remove -Slug <s>` | `bash "$ROOT/bin/bus-schedule.sh" remove --slug <s>` |
+| **listar** | `PS "$ROOT\bin\bus-schedule.ps1" -Action list -Project <p>` | `bash "$ROOT/bin/bus-schedule.sh" list --project <p>` |
+| **remover** | `PS "$ROOT\bin\bus-schedule.ps1" -Action remove -Slug <s> -Project <p>` | `bash "$ROOT/bin/bus-schedule.sh" remove --slug <s> --project <p>` |
 
 ## `/bus-schedule list` e `/bus-schedule remove <slug>`
-Chame direto o *listar* / *remover* e reporte a saída. (Remover apaga a tarefa do SO **e** os artefatos em `~/.claude/bus-schedules/<slug>/`.)
+**Antes de qualquer uma das duas: resolva a identidade** via `bus-name` (sem args) → **PROJECT** + **SLUG**. `NONE` → esta sessão não está no BUS; peça pro operador rodar `/bus <projeto> <slug>` e **pare**.
+
+Depois chame o *listar* / *remover* **sempre com `-Project`/`--project` = o SEU projeto**, e reporte a saída.
+
+**Por que o projeto é obrigatório aqui:** os agendamentos ficam num diretório **global** (`~/.claude/bus-schedules/`), mas cada um pertence a um projeto. Sem o filtro você veria — e poderia **apagar** — agendamento de outro projeto, o que contraria o isolamento do BUS (você só vê e endereça quem está no seu projeto). Com o filtro: o `list` mostra só os seus (e avisa quantos foram omitidos), e o `remove` **recusa** se o slug pertencer a outro projeto (`OUTRO_PROJETO=<projeto>`, nada é removido). *(Remover apaga a tarefa do SO **e** os artefatos em `~/.claude/bus-schedules/<slug>/`.)*
 
 ## `/bus-schedule create <prompt>` — fluxo
 1. **Identidade:** resolva via `bus-name` (sem args) → **PROJECT** + seu **SLUG**. `NONE` → esta sessão não está no BUS; peça pro operador rodar `/bus <projeto> <slug>` e **pare**.
