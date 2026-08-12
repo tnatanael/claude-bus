@@ -66,6 +66,20 @@ if [ -n "${1:-}" ]; then
     [ -z "$ns" ] && { ns="$np"; np="default"; }   # compat: 1 linha = slug, projeto default
     if [ "$np" = "$proj" ] && [ "$ns" = "$slug" ]; then rm -f "$nf" "$seen_dir/$bn"; fi
   done
+  # LOCK ORFAO DO MESMO SLUG (auto-cura do /clear): a sessao ganha sid NOVO, mas o .bus-lock
+  # ficou com o sid ANTIGO -> o -Release responde LOCK_NOT_MINE e o PROJETO fica preso ate o
+  # lease. O slug e exclusivo (eviccao acima), entao lock em nome dele so pode ser meu.
+  if [ "$proj" = "default" ]; then projroot_l="$bus_root"; else projroot_l="$bus_root/$proj"; fi
+  lock_l="$projroot_l/.bus-lock"
+  if [ -f "$lock_l" ]; then
+    ll_slug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock_l")"
+    ll_sid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock_l")"
+    if [ "$ll_slug" = "$slug" ] && [ "$ll_sid" != "$sid" ]; then
+      rm -f "$lock_l"
+      echo "LOCK_ORFAO_LIBERADO=$(printf '%s' "$ll_sid" | cut -c1-8)"
+      printf '%s\tlock-orfao-liberado\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" "$(printf '%s' "$ll_sid" | cut -c1-8)" "$slug" >> "$bus_root/.bus-gate.log" 2>/dev/null || true
+    fi
+  fi
   prio="${3:-}"
   case "$prio" in
     ''|*[!0-9]*) : ;;                                  # so se for numero

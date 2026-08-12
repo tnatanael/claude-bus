@@ -219,10 +219,18 @@ try {
     try {
       $L = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
       $exp = [datetimeoffset]::Parse($L.expiry)
-      if ($now -lt $exp -and $L.sid -ne $sid) {
+      # SID TROCOU (auto-cura): quando o app trava e o operador faz /clear, a sessao ganha um
+      # sid NOVO -- mas o lock ficou gravado com o sid ANTIGO. Comparando so por sid, a sessao
+      # nova nao reconhece o proprio lock, nao consegue liberar, e o PROJETO INTEIRO fica preso
+      # ate o lease de 1h. Como o registro do slug e EXCLUSIVO (o bus-name -Set evicta os outros
+      # sids do mesmo projeto+slug), um lock em nome do MEU slug so pode ser de uma encarnacao
+      # anterior de MIM -> nao defiro; sigo e roubo no acquire (passo 5b).
+      $meuSlugSidVelho = ([string]$L.slug -eq $slug -and $L.sid -ne $sid)
+      if ($now -lt $exp -and $L.sid -ne $sid -and -not $meuSlugSidVelho) {
         BusLog $base $sid $slug ("defer-lock>" + ([string]$L.slug))   # SILENCIOSO
         BusBlock $null
       }
+      if ($meuSlugSidVelho) { BusLog $base $sid $slug 'lock-sid-trocado' }
     } catch {}   # lock corrompido/ilegivel -> trata como livre
   }
 
@@ -276,8 +284,11 @@ try {
       try {
         $L2 = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
         $exp2 = [datetimeoffset]::Parse($L2.expiry)
-        if ($L2.sid -eq $sid -or $now -ge $exp2) {
-          [System.IO.File]::WriteAllText($lockFile, $obj, $enc); $acquired = $true; $how = 'acquire-steal'
+        # rouba se: e MEU sid, ja EXPIROU, ou e o MEU SLUG com sid velho (sessao anterior que
+        # o /clear matou -- o slug e exclusivo, entao aquele lock so pode ser meu). Ver passo 4.
+        if ($L2.sid -eq $sid -or $now -ge $exp2 -or [string]$L2.slug -eq $slug) {
+          [System.IO.File]::WriteAllText($lockFile, $obj, $enc); $acquired = $true
+          $how = if ([string]$L2.slug -eq $slug -and $L2.sid -ne $sid) { 'acquire-sid-trocado' } else { 'acquire-steal' }
         }
       } catch {}
     }

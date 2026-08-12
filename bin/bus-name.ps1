@@ -92,6 +92,25 @@ if ($Set -ne '') {
       Remove-Item -LiteralPath (Join-Path $seenDir $nf.BaseName) -Force -ErrorAction SilentlyContinue
     }
   }
+  # LOCK ORFAO DO MESMO SLUG (auto-cura do /clear): se o app trava e o operador da /clear, a
+  # sessao ganha um sid NOVO. O .bus-lock ficou gravado com o sid ANTIGO -> a sessao nova nao
+  # reconhece o proprio lock, o -Release responde LOCK_NOT_MINE, e o PROJETO INTEIRO fica preso
+  # ate o lease de 1h. Como o registro do slug e EXCLUSIVO (a eviccao acima acabou de garantir
+  # isso), um lock em nome deste slug so pode ser de uma encarnacao anterior -> libero aqui, no
+  # re-arme, que e exatamente quando a sessao se re-apresenta ao BUS.
+  $projRootL = if ($proj -eq 'default') { $BusRoot } else { Join-Path $BusRoot $proj }
+  $lockL = Join-Path $projRootL '.bus-lock'
+  if (Test-Path -LiteralPath $lockL) {
+    try {
+      $LL = (Get-Content -LiteralPath $lockL -Raw) | ConvertFrom-Json
+      if ([string]$LL.slug -eq $slug -and [string]$LL.sid -ne $sid) {
+        Remove-Item -LiteralPath $lockL -Force -ErrorAction SilentlyContinue
+        $velho = if ($LL.sid) { ([string]$LL.sid).Substring(0, [Math]::Min(8, ([string]$LL.sid).Length)) } else { '?' }
+        Write-Output ('LOCK_ORFAO_LIBERADO=' + $velho)   # o modelo reporta isso ao operador
+        try { [System.IO.File]::AppendAllText((Join-Path $BusRoot '.bus-gate.log'), ("{0}`tlock-orfao-liberado`t{1}`t{2}`r`n" -f ([datetimeoffset]::Now.ToString('o')), $velho, $slug), $enc) } catch {}
+      }
+    } catch {}
+  }
   # -Priority (>=0): upsert "<slug>:<n>" no <projroot>/.priority -- prioridade do gate
   # (default 1000; menor cede mais a vez). Omitido = nao mexe (prioridade persiste).
   if ($Priority -ge 0) {

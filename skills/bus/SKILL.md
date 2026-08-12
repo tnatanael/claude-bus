@@ -31,6 +31,7 @@ Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (a
 - **`/bus` COM args (CONFIG)** → **ORDEM: `/bus <projeto> <slug> [prioridade]` — o PROJETO vem PRIMEIRO** (1º arg = projeto, 2º = slug, 3º opcional = **prioridade** 0–1000, default 1000, menor cede mais). Grave via *nome — gravar*, **conferindo qual valor é qual** (os parâmetros são nomeados: `-Project`/`-Set`). O projeto é **OBRIGATÓRIO**. Registrar **reivindica** o slug (apaga sid antigo do mesmo slug+projeto — sem ghost).
   - `NEED_PROJECT` (faltou o projeto ou veio `default`) ou `NEED_SLUG` → **pergunte** o que faltou e repita.
   - **`INVERTED`** → o operador quase certamente digitou na **ordem antiga** (slug primeiro): o `bus-name` viu que o "slug" informado já é um **projeto** existente e **não gravou nada**. Mostre o `HINT=` e **confirme com ele** antes de repetir com a ordem certa.
+  - **`LOCK_ORFAO_LIBERADO=<sid8>`** → esta sessão tinha um **sid anterior** (o app travou e o operador deu `/clear`) que morreu **segurando o lock do projeto**. O re-arme liberou. **Reporte ao operador em 1 linha** — o projeto estava travado pra todo mundo e voltou a andar.
 - **`/bus` BARE (PROCESSAR)** → **não resolva identidade aqui**: o `bus-inbox` (passo 3) a resolve sozinho e devolve `BUS_SLUG=`/`BUS_PROJECT=` no topo. Se devolver `BUS_IDENTITY=NONE` (sessão nunca registrada), **pergunte** o slug + projeto, registre (CONFIG) e pare.
 
 ## 2. O que o /bus faz

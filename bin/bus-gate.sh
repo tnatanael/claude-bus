@@ -159,7 +159,10 @@ main() {
   if [ -f "$lock" ]; then
     lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
-    if [ -n "$lexp" ] && [ "$now" -lt "$lexp" ] && [ "$lsid" != "$sid" ]; then
+    lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock")"
+    # SID TROCOU (auto-cura do /clear): lock em nome do MEU slug com sid diferente = encarnacao
+    # anterior desta mesma sessao (o slug e exclusivo). Nao defiro; roubo no acquire. Ver .ps1.
+    if [ -n "$lexp" ] && [ "$now" -lt "$lexp" ] && [ "$lsid" != "$sid" ] && [ "$lslug" != "$slug" ]; then
       buslog "$base" "$sid" "$slug" "defer-lock>$lsid"
       bus_block
     fi
@@ -211,11 +214,15 @@ main() {
       buslog "$base" "$sid" "$slug" acquire
       exit 0
     fi
-    # ja existe: rouba so se for MEU ou EXPIRADO
+    # ja existe: rouba se for MEU sid, se EXPIROU, ou se for o MEU SLUG com sid velho (sessao
+    # anterior morta por /clear -- o slug e exclusivo, entao aquele lock so pode ser meu).
     lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
-    if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; }; then
-      printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" acquire-steal; exit 0
+    lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock")"
+    if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; } || [ "$lslug" = "$slug" ]; then
+      how=acquire-steal
+      [ "$lslug" = "$slug" ] && [ "$lsid" != "$sid" ] && how=acquire-sid-trocado
+      printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" "$how"; exit 0
     fi
     buslog "$base" "$sid" "$slug" defer-race
     bus_block

@@ -15,6 +15,21 @@ try {
   }
   $projRoot = if ($Project -and $Project -ne 'default') { Join-Path $base $Project } else { $base }
   $lock = Join-Path $projRoot '.bus-lock'
+  # IDENTIDADE PERDIDA (ex.: o operador apagou o names/<sid> ou a sessao trocou de sid num
+  # /clear): sem projeto resolvido, o caminho acima aponta pra RAIZ BASE e o -Release responde
+  # LOCK_ABSENT olhando no lugar errado -- enquanto o lock real segue preso no projeto, travando
+  # todo mundo. Nesse caso varro os projetos atras de um lock que seja MEU (por sid) e uso ele.
+  if (-not $Project -and $sid -and -not (Test-Path -LiteralPath $lock)) {
+    foreach ($d in (Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue)) {
+      if ($d.Name -in @('names','seen','inbox','processing','done','rejected','monitor','presence','state')) { continue }
+      $cand = Join-Path $d.FullName '.bus-lock'
+      if (-not (Test-Path -LiteralPath $cand)) { continue }
+      try {
+        $LC = (Get-Content -LiteralPath $cand -Raw) | ConvertFrom-Json
+        if ([string]$LC.sid -eq $sid) { $lock = $cand; $Project = $d.Name; break }
+      } catch {}
+    }
+  }
   if ($Release) {
     if ((Test-Path -LiteralPath $lock) -and $sid) {
       $L = $null
