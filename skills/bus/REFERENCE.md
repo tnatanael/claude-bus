@@ -38,6 +38,16 @@ Ao processar esse handoff, o especialista **desarma o cron e NÃO re-arma** (`SK
 
 **Por que NÃO usa a pausa:** o marcador `.bus-paused` faz o gate deferir o tique — o especialista nunca acordaria pra receber o shutdown. Desativar depende do tique passar. Se quiser as duas coisas, desative primeiro e pause depois que os chips ficarem vermelhos. **Pra religar:** `/bus <projeto> <slug>` em cada sessão (o cron volta no arme do passo 2).
 
+## /bus-schedule — escopo de projeto (v0.7.7)
+Os agendamentos vivem num diretório **global** (`~/.claude/bus-schedules/<slug>/`), fora da árvore do BUS — é lá que ficam o `body.txt`, o `schedule.meta` e os wrappers que a tarefa do SO executa. Mas **cada agendamento pertence a um projeto** (`project=` no `schedule.meta`, gravado na criação).
+
+Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remove` apagava qualquer um por nome de slug — o que fura o isolamento que vale no resto do BUS (você só vê e endereça quem está no seu projeto). Por isso os dois passaram a receber `-Project`/`--project`:
+
+- **`list`** mostra só os do seu projeto e informa quantos ficaram de fora (`(N agendamento(s) de OUTRO projeto omitido(s))`) — o especialista sabe que existe algo fora do escopo sem ver o quê.
+- **`remove`** **recusa** se o slug pertencer a outro projeto (`OUTRO_PROJETO=<projeto>`) e não apaga nada. Sem essa guarda, uma colisão de nome de slug entre projetos apagaria a tarefa do SO **e** os artefatos de outra frente — irreversível.
+- Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
+- Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
+
 ## /bus-message (instrução do operador, sem acordar o modelo)
 `/bus-message <texto>` é interceptado pelo **próprio gate** (hook `UserPromptSubmit`): ele resolve a identidade da sessão (`names/<sid>`), escreve um handoff `operador→seu-slug` no inbox do projeto (com o token, mesma lógica do bus-send) e **bloqueia o prompt (`exit 2`)** — o modelo **NÃO acorda**, custo ZERO de token. O especialista processa a instrução no próximo `/bus` (tick do cron ou manual), como qualquer handoff (`BUS_FROM=operador`, sem retorno). Como `/bus-message` não casa o regex `^/bus(\s|$)`, não interfere no gating normal do `/bus`. Há uma skill `bus-message` de **fallback**: se o hook não estiver instalado, o prompt chega ao modelo e a skill escreve o handoff via bus-send (custo pequeno, mas funciona).
 
