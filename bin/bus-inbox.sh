@@ -96,6 +96,18 @@ done
 # INBOX GERAL do projeto: destinos distintos com handoff pendente (o "olhar o inbox geral, nao
 # so o seu"). So o nome do arquivo (escrita atomica). VAZIO = bus parado: se voce termina
 # esperando resposta e isto esta vazio, o retorno NAO vem sozinho -> peca o status ("fio vivo").
+# PROCESSING ORFAO (par do .ps1): handoff que VOCE reivindicou e nunca fechou -- turno morto, app
+# fechado, lease expirado, tarefa longa que nao voltou. NINGUEM MAIS pega: este leitor le so o
+# inbox/. Sem o aviso, fica preso pra sempre e quem espera a resposta trava. So os ANTIGOS (>=30min).
+stale_proc_min=30
+now_s=$(date +%s)
+for pf in "$bus_root/processing"/to-"$me"__*.handoff; do
+  [ -e "$pf" ] || continue
+  pm=$(date -r "$pf" +%s 2>/dev/null || stat -c %Y "$pf" 2>/dev/null || echo "$now_s")
+  age=$(( (now_s - pm) / 60 ))
+  [ "$age" -ge "$stale_proc_min" ] && echo "BUS_STALE_PROCESSING=$pf (parado ha $age min)"
+done
+
 pend=""
 for f in "$inbox"/to-*.handoff; do
   [ -e "$f" ] || continue

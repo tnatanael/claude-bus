@@ -120,6 +120,18 @@ if ($found -eq 0) { Write-Output 'BUS_EMPTY' }
 # so o seu"). So o nome do arquivo (escrita e atomica -> .handoff = completo), barato. VAZIO =
 # bus parado: se voce termina esperando resposta e isto esta vazio, o retorno NAO vem sozinho
 # (ninguem te acorda) -> peca o status a quem voce espera (doutrina "fio vivo" da skill).
+# PROCESSING ORFAO: handoff que VOCE reivindicou (moveu pra processing\) e nunca fechou -- turno
+# morto, app fechado, contexto compactado, lease expirado, ou tarefa longa que nunca te reacordou.
+# NINGUEM MAIS vai pegar de volta: este leitor le so o inbox\, e o gate so conta o inbox\. Sem este
+# aviso o handoff fica preso pra sempre e quem espera a resposta trava em silencio.
+# So os ANTIGOS (>= 30 min) saem, pra nao confundir com o que esta EM VOO nesta passada.
+$STALE_PROC_MIN = 30
+foreach ($h in (Get-ChildItem -LiteralPath (Join-Path $BusRoot 'processing') -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -eq '.handoff' -and $_.Name.StartsWith($prefix) })) {
+  $ageMin = [int]((Get-Date) - $h.LastWriteTime).TotalMinutes
+  if ($ageMin -ge $STALE_PROC_MIN) { Write-Output ('BUS_STALE_PROCESSING=' + $h.FullName + ' (parado ha ' + $ageMin + ' min)') }
+}
+
 $pend = @{}
 foreach ($h in (Get-ChildItem -LiteralPath $inbox -File -Filter 'to-*.handoff' -ErrorAction SilentlyContinue)) {
   if ($h.Name -match '^to-(.+?)__') { $pend[$matches[1]] = $true }
