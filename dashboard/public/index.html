@@ -285,6 +285,8 @@
   .handoff .route .prio.low { color: #6ea8fe; background: rgba(110,168,254,.14); border: 1px solid rgba(110,168,254,.35); }
   .handoff .route .prio.high { color: var(--amber); background: rgba(210,153,34,.16); border: 1px solid rgba(210,153,34,.4); }
   .handoff .route .prio.def { color: var(--grey); background: rgba(255,255,255,.04); border: 1px solid var(--border); }
+  /* destino sem registro no projeto: nao tem prioridade -- e o handoff nao tem quem leia */
+  .handoff .route .prio.ghost { color: var(--red); background: rgba(248,81,73,.12); border: 1px dashed rgba(248,81,73,.45); }
   .handoff .id {
     font-family: var(--mono);
     font-size: 10.5px;
@@ -597,13 +599,23 @@ function handoffCard(it, idSet, proj, cancelable) {
   const etaTag = it.tick ? `<span class="eta" data-to="${esc(it.to)}" data-to-armed="${it.toArmed === false ? "0" : (it.toArmed === true ? "1" : "")}" data-sent="${idToEpoch(it.id)}"></span>` : "";
   // Destino OFFLINE (cron do destino parado, seen >10min): X vermelho grande à direita — o
   // handoff vai ficar parado no inbox dele até voltar. Só no inbox (it.tick) e com toArmed=false.
+  // Destino SEM REGISTRO no projeto (nenhum names/ com esse slug): pior que offline — ninguém
+  // vai voltar pra ler. Antes passava despercebido (sem ✕, e ainda com badge de prioridade
+  // vinda de linha órfã no .priority), então o card parecia normal.
+  const destGhost = (it.toRegistered === false);
   const destOffline = (it.tick && it.toArmed === false);
-  const offlineX = destOffline ? `<span class="dest-offline" title="destino ${esc(it.to)} OFFLINE (sem tique há +10min) — o handoff fica parado no inbox dele até a sessão voltar; rode /bus nela">✕</span>` : "";
+  const offlineX = (it.tick && (destOffline || destGhost))
+    ? `<span class="dest-offline" title="${destGhost
+        ? `destino ${esc(it.to)} NÃO ESTÁ REGISTRADO no BUS deste projeto — ninguém vai ler este handoff; registre a sessão com /bus <projeto> ${esc(it.to)} ou cancele o card`
+        : `destino ${esc(it.to)} OFFLINE (sem tique há +10min) — o handoff fica parado no inbox dele até a sessão voltar; rode /bus nela`}">✕</span>`
+    : "";
   // prioridade do destino (badge sempre; <1000 cede a vez, =1000 default, >1000 fura a fila)
   const tp = (it.toPrio == null ? 1000 : it.toPrio);
   const prioCls = tp < 1000 ? "low" : (tp > 1000 ? "high" : "def");
   const prioArrow = tp < 1000 ? "↓" : (tp > 1000 ? "↑" : "");
-  const prioTag = `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
+  const prioTag = destGhost
+    ? `<span class="prio ghost" title="${esc(it.to)} não está registrado no BUS deste projeto — não tem prioridade (a prioridade é do especialista, não do nome)">sem registro</span>`
+    : `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
   return `
     <div class="handoff${linkable}${destOffline ? " has-offline" : ""}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
       ${cancelBtn}${offlineX}

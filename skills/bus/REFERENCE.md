@@ -60,6 +60,18 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## Prioridade órfã: desregistrar não apaga o `.priority` (v0.9.4)
+
+O `<projeto>/.priority` é indexado por **slug**, não por sessão, e isso é **de propósito**: uma sessão que reinicia ganha um `sid` novo e roda `/bus <projeto> <slug>` **sem** o 3º argumento — a prioridade tem que sobreviver, senão o controlador viraria default 1000 a cada `/clear`.
+
+O efeito colateral apareceu quando um especialista foi **removido**: "desregistrar" **não é uma operação do BUS** — não existe comando. O que se faz é apagar `names/<sid>.txt` (e o `seen/`) na mão, e nada toca no `.priority`. A linha fica órfã para sempre e o dashboard seguia exibindo o badge de prioridade de um destino que **não existe mais**.
+
+Pior que o badge: um card endereçado a um slug inexistente **parecia normal**. O ✕ vermelho de destino offline depende de `toArmed === false`, e destino não registrado dava `toStatus = null` → `toArmed = null` → sem ✕. Ou seja: o caso *pior* (ninguém vai voltar pra ler) era o único **sem** aviso visual.
+
+Correção: prioridade só existe para quem está no **roster** (`names/`). O servidor marca `toRegistered` e zera o `toPrio` (`null`) de destino não registrado; o front mostra `sem registro` (badge tracejado vermelho) e passa a exibir o ✕ também nesse caso, com texto próprio.
+
+**A linha órfã ainda dá para limpar na mão** (`grep -v '^slug:' .priority`) e vale limpar quando o número for **> 1000**: o gate compara `xPrio > myPrio` e cederia a vez para um destino fantasma enquanto o handoff estiver no inbox — nenhum tique passa. Com número baixo (0/10, o caso comum de controlador) é inerte. Se um dia existir um comando de dereg, o lugar dele é o `bus-name` (apagar `names/` + `seen/` + a linha do `.priority` numa operação só).
+
 ## /bus-message (instrução do operador, sem acordar o modelo)
 `/bus-message <texto>` é interceptado pelo **próprio gate** (hook `UserPromptSubmit`): ele resolve a identidade da sessão (`names/<sid>`), escreve um handoff `operador→seu-slug` no inbox do projeto (com o token, mesma lógica do bus-send) e **bloqueia o prompt (`exit 2`)** — o modelo **NÃO acorda**, custo ZERO de token. O especialista processa a instrução no próximo `/bus` (tick do cron ou manual), como qualquer handoff (`BUS_FROM=operador`, sem retorno). Como `/bus-message` não casa o regex `^/bus(\s|$)`, não interfere no gating normal do `/bus`. Há uma skill `bus-message` de **fallback**: se o hook não estiver instalado, o prompt chega ao modelo e a skill escreve o handoff via bus-send (custo pequeno, mas funciona).
 

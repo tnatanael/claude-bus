@@ -334,8 +334,15 @@ function attachToCron(handoffs, specs, projRoot) {
   const prio = readPriorities(projRoot);
   // toPrio (prioridade do destino) em TODOS os status -> o badge aparece certo em qualquer
   // card, nao so no inbox (antes, processing/done caiam no default 1000 no front).
+  // PRIORIDADE SO EXISTE PRA QUEM ESTA REGISTRADO (names/). O .priority e indexado por SLUG e
+  // sobrevive de proposito a restart/re-registro -- mas desregistrar um especialista (apagar o
+  // names/) nao apagava a linha dele, e o card pra um destino INEXISTENTE seguia exibindo badge
+  // como se fosse gente. toRegistered=false -> toPrio=null e o front marca "sem registro".
   for (const status of ['inbox', 'processing', 'done', 'rejected']) {
-    for (const it of (handoffs[status] || [])) it.toPrio = (it.to in prio) ? prio[it.to] : 1000;
+    for (const it of (handoffs[status] || [])) {
+      it.toRegistered = (it.to in statusMap);
+      it.toPrio = it.toRegistered ? ((it.to in prio) ? prio[it.to] : 1000) : null;
+    }
   }
   // tick + toStatus/toArmed (eta "na fila"/"offline" + X vermelho) so faz sentido no INBOX.
   for (const it of (handoffs.inbox || [])) {
