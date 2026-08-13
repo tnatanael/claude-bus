@@ -15,31 +15,41 @@
 # (nao sobrepoe), senao adquire e passa COM o lock. Preserva o invariante mesmo sob falha.
 # Forense: acquire/steal/defer-race/fail-open vao pra <base>/.bus-gate.log (best-effort).
 #
-# BLOQUEIO SEM CARD (NAO voltar pra exit 2): bloquear e obrigatorio -- e o que impede o wake do
-# modelo (custo zero). O que NAO e obrigatorio e o barulho. Todo `exit 2` vira um card PERMANENTE
-# no app ("Prompt bloqueado por um hook" + a linha de comando), e o tique ocioso dispara a cada
-# N min em CADA sessao -> a conversa enchia. Por isso todo bloqueio passa pelo BusBlock, que usa
-# {"continue":false} (aviso transitorio, sem rastro). Detalhe das 3 variantes medidas: ver BusBlock.
-# Regra de uso: mensagem no stopReason SO onde o operador acionou algo na mao e espera retorno
-# (/bus-message); defer automatico (empty/lock/prio/race/paused) e MUDO -- o rastro vive no
-# .bus-gate.log e o seen/<sid> prova que o tique rodou.
+# BLOQUEIO: ver a funcao BusBlock. Resumo -- defer AUTOMATICO usa {"decision":"block"}, que APAGA
+# o prompt E a injecao da SKILL (o /bus expande a skill ANTES do hook decidir, entao continue:false
+# deixava ~134k tokens/h de contexto a toa numa sessao que nem trabalhava). Onde o operador espera
+# retorno (/bus-message) usamos continue:false+stopReason, que mostra o texto. NUNCA voltar pro
+# exit 2: ele gera card permanente com a linha de comando. Numeros medidos: ver BusBlock.
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
 $LEASE_MIN      = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
 
 function BusBlock([string]$msg) {
-  # BLOQUEIA o prompt sem sujar a conversa. MEDIDO no app em 2026-08-12 (3 variantes):
-  #   exit 2                                  -> card PERMANENTE ("Prompt bloqueado por um
-  #                                              hook" + a linha de comando do PowerShell);
-  #   {"decision":"block","reason":""}        -> linha recolhida, mas PERMANECE;
-  #   {"continue":false} (esta)               -> aviso TRANSITORIO, nao deixa rastro.
-  # Com $msg, o texto vai no stopReason e aparece nesse aviso ("Operation stopped by hook:
-  # <msg>") -- use SO onde o operador acionou algo na mao e espera retorno. Sem $msg = mudo.
-  # Os 3 bloqueiam igual (custo ZERO de API: o modelo NAO acorda).
+  # BLOQUEIA o prompt. As 3 variantes bloqueiam igual (o modelo NAO acorda), MAS elas diferem
+  # no que sobra no HISTORICO -- e isso e o que estava estourando a janela de contexto:
+  #
+  #   exit 2                            card PERMANENTE (+ linha de comando do PS). Pior.
+  #   {"continue":false}                aviso TRANSITORIO, nao deixa card... MAS a SKILL JA FOI
+  #                                     INJETADA e FICA no historico (a expansao do /bus acontece
+  #                                     ANTES do hook decidir).
+  #   {"decision":"block"}  <- ESTA     APAGA o prompt: some a bolha E a injecao da skill.
+  #
+  # MEDIDO em 12/08/2026, sessao cl-po (bloqueada o dia todo: 316 defers, ZERO acquires):
+  # com continue:false ela acumulou 353 injecoes da SKILL sem NUNCA trabalhar -- ~134k tokens/h
+  # de contexto a toa, enchendo 1M em ~7h de ociosidade. Trocando por decision:block, 4 tiques
+  # rodaram e o transcript NAO cresceu 1 byte (delta 0, arquivo parado por 11 min).
+  # Preco: o app deixa uma LINHA RECOLHIDA ("Prompt bloqueado por um hook"), sem o card gordo.
+  # Vale: linha discreta no lugar de vazamento de contexto.
+  #
+  # $msg (so onde o operador acionou algo na mao e espera retorno, ex.: /bus-message): ai usamos
+  # continue:false+stopReason, que MOSTRA o texto num aviso transitorio. Sao raros, entao a
+  # injecao que sobra e irrelevante -- e o retorno pro operador vale mais.
   try {
-    $o = @{ 'continue' = $false }
-    if ($msg) { $o['stopReason'] = $msg }
-    Write-Output ($o | ConvertTo-Json -Compress)
+    if ($msg) {
+      Write-Output ((@{ 'continue' = $false; 'stopReason' = $msg } | ConvertTo-Json -Compress))
+    } else {
+      Write-Output '{"decision":"block","reason":""}'
+    }
     exit 0
   } catch { exit 2 }   # se o JSON falhar, cai no exit 2: gera card, mas o bloqueio e garantido
 }

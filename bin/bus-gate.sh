@@ -27,7 +27,10 @@ bus_block() {   # $1 = mensagem OPCIONAL (vai no stopReason)
     m=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
     printf '{"continue":false,"stopReason":"%s"}\n' "$m"
   else
-    printf '{"continue":false}\n'
+    # SEM mensagem = defer automatico -> decision:block, que APAGA o prompt E a injecao da SKILL.
+    # (continue:false nao apaga: a skill ja entrou no historico antes de o hook decidir. Medido
+    # em 12/08/2026: 353 injecoes numa sessao com ZERO acquires. Ver bus-gate.ps1 p/ os numeros.)
+    printf '{"decision":"block","reason":""}\n'
   fi
   exit 0
 }
