@@ -30,6 +30,24 @@ O monitor **morre ao detectar** — de propósito, é assim que ele acorda a ses
 
 Daí a reconciliação obrigatória: comparar o `snap()` atual com o checkpoint salvo **antes** de rearmar, e processar o que apareceu. Sem isso o sistema perde eventos de forma silenciosa — o pior modo de falha, porque parece que está funcionando.
 
+## Cego ≠ mudou (o terceiro estado)
+
+A primeira versão comparava as strings cruas dos dois snapshots. Parece seguro, mas quando a API do GitHub falha ela devolve um **corpo de erro**: não-vazio e diferente do baseline. O guard `[ -n "$CUR" ]` passava, a comparação dava "diferente", e o monitor gritava `MUDOU_NO_GITHUB` sem nada ter acontecido.
+
+**Duas ocorrências reais, causas diferentes:** conta do `gh` trocada globalmente por outra sessão, e um 404 transitório da API. Mesmo sintoma — sinal de que o problema não é a causa, é o monitor **não distinguir "não consegui ler" de "mudou"**.
+
+Isso é grave **neste desenho** porque o carteiro reage ao disparo mandando handoff: alarme falso vira ruído no BUS de um especialista. A skill ensina que *"se não houve handoff, o especialista não recebeu nada"* — o inverso também vale: **handoff sem evento gasta a atenção de quem devia estar codando**.
+
+A correção é o `snap()` validar o próprio formato (`return 1` em vez de devolver lixo) e o laço contar **leituras cegas consecutivas**, saindo com código próprio após ~10 min e com mensagem que diz explicitamente *"ISTO NÃO É MUDANÇA"* — senão quem lê o output cai no mesmo engano que o código.
+
+⚠️ **Limitação conhecida:** a validação exige pelo menos uma issue (`^([0-9]+:[A-Z]+ )+$`). Num repo **sem nenhuma issue** o baseline falha e o monitor sai com `MONITOR_NAO_ARMOU`. Para o uso pretendido (vigiar um projeto ativo) é aceitável, e é melhor que o alternativo — não dá para distinguir "vazio porque não há issues" de "vazio porque a chamada falhou" sem inspecionar o código de saída do `gh`. Se um dia precisar vigiar repo vazio, é aí que mexer.
+
+## Carteiro externo: write-only por desenho
+
+O passo 1 pressupõe que o watcher é um especialista registrado — e na maioria dos casos é (o controlador). Mas existe um arranjo legítimo que a primeira versão mandava **parar**: o carteiro **externo**, um agente que só **escreve** handoff e **não lê** inbox.
+
+O risco não era só bloquear: uma sessão futura seguindo a skill ao pé da letra tentaria "consertar" **registrando o carteiro no BUS** — exatamente o que não se quer. Registrado, ele passa a **receber** handoff, e ninguém vai ler, porque ele não processa inbox. O `bus.externo` no estado existe para que a próxima sessão saiba que é intencional e não repita a tentativa.
+
 ## Por que "não presuma o gate do projeto"
 
 O especialista **obedece** ao que vem no handoff — ele não confere se aquele documento é mesmo o do projeto dele. Então apontar pro arquivo errado não gera erro visível: gera trabalho feito sob a **política de outro time**, e isso só aparece na revisão (ou em produção). É por isso que a regra é *localizar antes do primeiro handoff*, e não *deduzir na hora*.

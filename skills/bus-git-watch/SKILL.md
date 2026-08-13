@@ -21,7 +21,13 @@ Detecte os **três** tipos de evento (não só o primeiro que vem à cabeça):
 
 ## 1. Identidade (é o que amarra ao BUS)
 
-Resolva via *nome* do `/bus` (sem args) → **`PROJECT`** + **`SLUG`**. `NONE` → esta sessão não está no BUS: peça pro operador rodar `/bus <projeto> <slug>` e **pare**.
+Resolva via *nome* do `/bus` (sem args) → **`PROJECT`** + **`SLUG`**.
+
+**Veio `NONE`?** Antes de parar, veja se o **operador já forneceu a identidade** (projeto + slug de origem) ao te chamar:
+- **Forneceu** → siga com ela. Este é o **carteiro EXTERNO**: um agente que **escreve** handoff e **não lê** inbox, write-only por desenho, e que **não deve** ser registrado. Anote no estado (passo 6) que é externo e por quê.
+- **Não forneceu** → aí sim peça `/bus <projeto> <slug>` e **pare**.
+
+⚠️ **Não "conserte" um carteiro externo registrando-o no BUS.** Registrar faz ele passar a **receber** handoff — que ninguém vai ler, porque ele não processa inbox. O arranjo write-only é intencional.
 
 O `PROJECT` é **obrigatório** em todo handoff que você mandar — o gate serializa por projeto; sem ele o handoff entra na fila errada. Você só endereça especialistas **do mesmo projeto**.
 
@@ -54,16 +60,33 @@ A lista tem que bater com a realidade, e o maior id precisa conter um comentári
 
 Rode com `run_in_background: true`:
 
+🔴 **"Não consegui ler" é um TERCEIRO estado — nunca o compare.** Quando a API falha, ela devolve um **corpo de erro**: não-vazio e diferente do baseline. Comparar string crua faz isso virar `MUDOU_NO_GITHUB` e disparar handoff **sem evento nenhum** — aconteceu duas vezes em produção (conta do `gh` trocada por outra sessão; 404 transitório). Por isso o `snap()` **valida o próprio formato** e falha com `return 1`, e o laço conta leituras cegas em vez de comparar lixo.
+
 ```bash
 R=<owner/repo>
 snap() {
-  gh issue list --repo $R --state all --limit 100 --json number,state -q '.[] | "\(.number):\(.state)"' 2>/dev/null | sort | tr '\n' ' '
-  gh api repos/$R/issues/comments --paginate -q '.[].id' 2>/dev/null | sort -n | tail -1
+  local issues cid
+  issues=$(gh issue list --repo $R --state all --limit 100 --json number,state -q '.[] | "\(.number):\(.state)"' 2>/dev/null | sort | tr '\n' ' ')
+  cid=$(gh api repos/$R/issues/comments --paginate -q '.[].id' 2>/dev/null | sort -n | tail -1)
+  echo "$issues" | grep -qE '^([0-9]+:[A-Z]+ )+$' || return 1
+  [ -z "$cid" ] || echo "$cid" | grep -qE '^[0-9]+$' || return 1
+  printf '%s%s' "$issues" "$cid"
 }
-BASE=$(snap); echo "baseline: $BASE"
+BASE=$(snap) || { echo "MONITOR_NAO_ARMOU: leitura invalida no baseline"; exit 1; }
+echo "baseline: $BASE"
+CEGO=0
 for i in $(seq 1 240); do
-  CUR=$(snap)
-  if [ -n "$CUR" ] && [ "$CUR" != "$BASE" ]; then
+  if ! CUR=$(snap); then
+    CEGO=$((CEGO+1))
+    if [ $CEGO -ge 5 ]; then
+      echo "MONITOR_CEGO: 5 leituras invalidas seguidas (~10min). ISTO NAO E MUDANCA."
+      echo "Confira a ferramenta antes de concluir: gh auth status / gh api rate_limit."
+      exit 2
+    fi
+    sleep 120; continue
+  fi
+  CEGO=0
+  if [ "$CUR" != "$BASE" ]; then
     echo "MUDOU_NO_GITHUB"; echo "antes: $BASE"; echo "agora: $CUR"
     echo "--- issues abertas ---"
     gh issue list --repo $R --state open --json number,title,updatedAt -q '.[] | "#\(.number) \(.title) (atualizada \(.updatedAt))"' 2>/dev/null
@@ -76,13 +99,17 @@ done
 echo "MONITOR_EXPIROU: 8h sem novidade"
 ```
 
+**Códigos de saída:** `0` = mudou · `1` = não armou (baseline inválido) · `2` = cego (~10 min sem conseguir ler).
+
 `240 × 120s` ≈ 8 h. Ajuste os dois números conforme a espera, **sempre com teto**.
 
 ## 5. Quando ele te acordar
 
 A notificação só diz que a tarefa terminou — **leia o arquivo de output**.
 
-**`MONITOR_EXPIROU`** → nada mudou. Faça a reconciliação (passo 6) e rearme se ainda faz sentido.
+**`MONITOR_EXPIROU`** (saída 0 sem `MUDOU_`) → nada mudou. Faça a reconciliação (passo 6) e rearme se ainda faz sentido.
+
+**`MONITOR_CEGO`** (saída 2) ou **`MONITOR_NAO_ARMOU`** (saída 1) → **NÃO houve evento. Não mande handoff.** A ferramenta é que parou de enxergar: cheque `gh auth status` (outra sessão pode ter trocado a conta — é global) e `gh api rate_limit`. Conserte e rearme; só então reconcilie, porque durante a cegueira você **não** estava vigiando.
 
 **`MUDOU_NO_GITHUB`** → para **CADA** evento:
 
@@ -134,6 +161,8 @@ Guarde no **projeto do BUS**, não no scratchpad da sessão: `<base>/<PROJECT>/.
 
 ```json
 { "repo": "owner/repo", "rules_file": "<caminho do doc de regras deste projeto>",
+  "bus": { "project": "<projeto>", "from_slug": "<slug de origem dos handoffs>",
+           "externo": true, "motivo": "carteiro write-only: escreve handoff, nao le inbox" },
   "last_checked": "<ISO>", "issues_checkpoint": "1:CLOSED 2:OPEN", "last_comment_id": 123456,
   "events": [ { "timestamp": "<ISO>", "type": "issue_opened|comment|issue_closed", "issue": 2, "actor": "<login>" } ] }
 ```
@@ -146,5 +175,8 @@ Guarde no **projeto do BUS**, não no scratchpad da sessão: `<base>/<PROJECT>/.
 - ❌ **Monitorar UMA issue** (`gh issue view <n>`) → issue nova nasce sem ninguém ver. Monitore o **repo**.
 - ❌ **Reusar monitor que já disparou** → ele fez `exit 0`; nada está vigiando.
 - ❌ **Rearmar sem reconciliar** → perde o que chegou durante o processamento.
+- ❌ **Comparar snapshot sem validar o formato** → resposta de erro da API vira "mudou" e dispara handoff **sem evento**.
+- ❌ **Tratar `MONITOR_CEGO`/`MONITOR_NAO_ARMOU` como novidade** → o alarme falso gasta a atenção de quem devia estar codando; a regra "todo evento = handoff" **não** tem inverso.
+- ❌ **Registrar o carteiro externo no BUS** → ele passa a receber handoff que ninguém lê.
 - ❌ **Handoff sem `-Project`** (ou com `default`) → entra na fila errada e some.
 - ❌ **"Está público no GitHub, eles veem."** Não veem.
