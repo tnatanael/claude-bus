@@ -148,27 +148,47 @@ function parseHandoffBody(text) {
   return text.trim();
 }
 
-// Le TODOS os handoffs do projeto (4 pastas, done SEM filtro) com corpo -- base do thread.
+// Indice (em memoria) do cabecalho de cada handoff, por projeto: nome-do-arquivo -> metadados.
+// PERF -- o modal do thread ficava lento e PIORAVA todo dia. Medido no cl-adv (1205 handoffs):
+//   readdir das 4 pastas .......... 5 ms
+//   abrir+ler+fechar cada arquivo . ~390 ms   <- o custo real e SYSCALL POR ARQUIVO
+//   ler o arquivo inteiro ......... ~340 ms   (ler MENOS bytes nao ajuda: mesmo numero de syscalls)
+// Logo, a unica saida e NAO TOCAR em todo arquivo a cada abertura. Da pra cachear com seguranca
+// porque **handoff e IMUTAVEL**: depois de escrito (temp+rename) ele so MUDA DE PASTA. Entao o
+// cabecalho de um nome de arquivo nunca muda -> a chave do cache e o NOME, e mover de pasta
+// (inbox->processing->done) custa ZERO leitura: a pasta vem do readdir.
+// Em regime: 5 ms de readdir + 1 leitura por handoff NOVO (punhado). Nao cresce com o done/.
+const _threadIdx = new Map();   // root -> Map(nomeDoArquivo -> meta)
+
 function readAllForThread(root) {
+  let cache = _threadIdx.get(root);
+  if (!cache) { cache = new Map(); _threadIdx.set(root, cache); }
   const items = [];
+  const vivos = new Set();
   for (const folder of HANDOFF_FOLDERS) {
     const dir = path.join(root, folder);
     for (const f of safeReaddir(dir)) {
-      const fromName = parseHandoffFilename(f);
-      if (!fromName) continue;
-      const raw = safeReadText(path.join(dir, f));
-      const header = parseHandoffHeader(raw);
-      items.push({
-        id: header.id || fromName.id,
-        from: header.from || fromName.from,
-        to: header.to || fromName.to,
-        replyRequired: String(header.reply_required).toLowerCase() === 'true',
-        inReplyTo: header.in_reply_to || '',
-        folder,
-        body: parseHandoffBody(raw),
-      });
+      if (!f.endsWith('.handoff')) continue;
+      vivos.add(f);
+      let meta = cache.get(f);
+      if (!meta) {                                   // so o que ainda nao foi visto e lido
+        const fromName = parseHandoffFilename(f);
+        if (!fromName) continue;
+        const header = parseHandoffHeader(safeReadText(path.join(dir, f)));
+        meta = {
+          id: header.id || fromName.id,
+          from: header.from || fromName.from,
+          to: header.to || fromName.to,
+          replyRequired: String(header.reply_required).toLowerCase() === 'true',
+          inReplyTo: header.in_reply_to || '',
+        };
+        cache.set(f, meta);
+      }
+      // folder/file mudam quando o handoff anda; vem do readdir, sem ler nada.
+      items.push(Object.assign({ folder, file: path.join(dir, f) }, meta));
     }
   }
+  for (const k of cache.keys()) if (!vivos.has(k)) cache.delete(k);   // sumiu do disco
   return items;
 }
 
@@ -190,7 +210,11 @@ function buildThread(root, targetId) {
   }
   const thread = [...seen].filter(id => byId.has(id)).map(id => byId.get(id));
   thread.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return thread.map(it => Object.assign({ isTarget: it.id === targetId }, it));
+  // SO agora le o corpo -- e so dos que entraram no thread (punhado), nao dos milhares do done/.
+  return thread.map(it => {
+    const { file, ...rest } = it;
+    return Object.assign({ isTarget: it.id === targetId, body: parseHandoffBody(safeReadText(file)) }, rest);
+  });
 }
 
 function buildState(root) {
