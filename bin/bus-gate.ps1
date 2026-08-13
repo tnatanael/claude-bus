@@ -48,6 +48,10 @@ function BusBlock([string]$msg) {
     if ($msg) {
       Write-Output ((@{ 'continue' = $false; 'stopReason' = $msg } | ConvertTo-Json -Compress))
     } else {
+      # NAO combine com continue:false: MEDIDO em 12/08 22:25-22:31 -- juntos, o continue:false
+      # PREVALECE (some o card, mas a skill volta a ser injetada: +2 e +3 injecoes em 2 min em
+      # duas sessoes, com defer-lock no log). Nao existe combinacao que de card limpo E contexto
+      # limpo: e um ou outro. Escolha do operador = decision:block (contexto limpo, card por tique).
       Write-Output '{"decision":"block","reason":""}'
     }
     exit 0
