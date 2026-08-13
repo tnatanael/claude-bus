@@ -16,7 +16,7 @@ description: Re-arma SÓ o cron de auto-recheck do BUS desta sessão — NÃO pr
    - Retornou `PROJECT=/SLUG=/BUS_CRON_INTERVAL=` → **guarde o `BUS_CRON_INTERVAL`** (intervalo do cron, default 5) e siga pro passo 2. Retornou `NONE` → esta sessão **nunca se registrou**; rode **`/bus <projeto> <slug>`** primeiro (sem identidade não dá pra re-armar) e pare.
 
 2. **Re-arme o cron DO ZERO.** `CronList`/`CronCreate`/`CronDelete` são **deferidas**: rode `ToolSearch select:CronList,CronCreate,CronDelete` ANTES.
-   - **DESARMAR:** `CronList` → `CronDelete` em **CADA** job com prompt começando em `/bus` (limpa phantom/duplicado — pós-restart o `CronList` pode listar um cron morto que **não dispara**; re-arme sempre do zero).
-   - **ARMAR:** `CronCreate(cron: "*/<N> * * * *", prompt: "/bus", recurring: true)`, onde **`<N>` = o `BUS_CRON_INTERVAL`** do passo 1 (default 5) — **UM** cron, a cada `<N>` min, prompt **bare `/bus`** (SEM slug/projeto). ⚠️ Só `*/N` ou valor único disparam — vírgula/`M/30` o harness aceita mas **NÃO dispara**.
+   - **DESARMAR:** `CronList` → `CronDelete` em **CADA** job cujo prompt começa com `/bus` **ou** `bus-tick` (limpa phantom/duplicado — pós-restart o `CronList` pode listar um cron morto que **não dispara**; re-arme sempre do zero).
+   - **ARMAR:** `CronCreate(cron: "*/<N> * * * *", recurring: true, prompt: "bus-tick: carregue a skill bus e processe o inbox (fluxo do /bus bare)")`, onde **`<N>` = o `BUS_CRON_INTERVAL`** do passo 1 (default 5) — **UM** cron, a cada `<N>` min, prompt de **TEXTO PURO** (nunca `/bus`: slash command expande a skill inteira no histórico a cada tique — ver SKILL do bus, passo 1). ⚠️ Só `*/N` ou valor único disparam — vírgula/`M/30` o harness aceita mas **NÃO dispara**.
 
 3. **NÃO** processe o inbox e **NÃO** libere lock. Reporte **"cron re-armado — slug=X, projeto=Y"**. O auto-recheck (bare `/bus` a cada `<N>` min) volta a rodar e o dashboard mostra o especialista armado.

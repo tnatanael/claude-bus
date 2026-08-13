@@ -30,7 +30,7 @@ bus_block() {   # $1 = mensagem OPCIONAL (vai no stopReason)
     # SEM mensagem = defer automatico -> decision:block, que APAGA o prompt E a injecao da SKILL.
     # (continue:false nao apaga: a skill ja entrou no historico antes de o hook decidir. Medido
     # em 12/08/2026: 353 injecoes numa sessao com ZERO acquires. Ver bus-gate.ps1 p/ os numeros.)
-    printf '{"decision":"block","reason":""}\n'
+    printf '{"continue":false}\n'
   fi
   exit 0
 }
@@ -86,7 +86,9 @@ main() {
   fi
 
   # 1. so gateia /bus; qualquer outro prompt passa (fast-path)
-  [[ "$prompt" =~ ^[[:space:]]*/bus([[:space:]]|$) ]] || exit 0
+  # Gateia /bus (manual) E o TIQUE do cron (texto puro). Slash command EXPANDE a skill na
+  # submissao, ANTES do hook -- por isso o tique deixou de ser "/bus". Ver bus-gate.ps1 passo 1.
+  [[ "$prompt" =~ ^[[:space:]]*(/bus([[:space:]]|$)|bus-tick) ]] || exit 0
   [ -n "$sid" ] || exit 0
 
   base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"

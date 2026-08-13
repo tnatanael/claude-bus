@@ -42,9 +42,11 @@ Slug/projeto minúsculos, sem espaço.
 > Um hook já te filtrou **antes** de você acordar: você só chega aqui com trabalho seu (inbox **ou** preso em `processing`), pós-restart, ou `/bus` manual. Chegou com trabalho → **o lock do projeto já é seu**; libere no fim.
 
 1. **Cron — desarma no início, re-arma no fim.** `CronList`/`CronCreate`/`CronDelete` são deferidas: rode `ToolSearch select:CronList,CronCreate,CronDelete` antes. **Não confie no `CronList`** (pós-restart lista *phantom* morto).
-   - **DESARMAR** = `CronList` → `CronDelete` em **CADA** job cujo prompt começa com `/bus` (fica ZERO).
-   - **ARMAR** = `CronCreate(cron:"*/<N> * * * *", prompt:"/bus", recurring:true)`, `<N>` = o `BUS_CRON_INTERVAL` devolvido pelos scripts. UM cron, bare, mesmo `*/<N>` pra frota. ⚠️ só `*/N` ou valor único disparam — vírgula e `M/30` **não**.
+   - **DESARMAR** = `CronList` → `CronDelete` em **CADA** job cujo prompt começa com `/bus` **ou** `bus-tick` (fica ZERO).
+   - **ARMAR** = `CronCreate(cron:"*/<N> * * * *", recurring:true, prompt:` **`"bus-tick: carregue a skill bus e processe o inbox (fluxo do /bus bare)"`** `)`, `<N>` = o `BUS_CRON_INTERVAL` devolvido pelos scripts. UM cron, mesmo `*/<N>` pra frota. ⚠️ só `*/N` ou valor único disparam — vírgula e `M/30` **não**.
+   - ⚠️ **O prompt do cron é TEXTO PURO, nunca `/bus`.** Slash command **expande esta skill no histórico já na submissão**, antes do hook decidir — então cada tique bloqueado deixava a SKILL inteira no contexto (medido: 353 injeções numa sessão que nunca processou nada, ~134k tokens/h, enchendo 1M em ~7h **ociosa**). Texto puro não expande: o tique custa a própria frase. **Não troque de volta.**
    - **CONFIG** → desarme+arme e pare. **BARE** → desarme **agora**, siga 2–6, re-arme no 6.
+   - 🔔 **Acordou com `bus-tick`?** A skill pode **não estar** no seu contexto (é o normal — ela não é mais injetada no tique). **Carregue-a** (ferramenta `Skill`, nome `bus`) e siga daqui. Esse round-trip só acontece quando há trabalho de verdade.
 2. **Leia o inbox** (só no BARE; sem `-Me`/`--me` — resolve identidade sozinho):
    ```
    BUS_CRON_INTERVAL=<N>        (arme */N no passo 6)

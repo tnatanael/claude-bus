@@ -15,11 +15,14 @@
 # (nao sobrepoe), senao adquire e passa COM o lock. Preserva o invariante mesmo sob falha.
 # Forense: acquire/steal/defer-race/fail-open vao pra <base>/.bus-gate.log (best-effort).
 #
-# BLOQUEIO: ver a funcao BusBlock. Resumo -- defer AUTOMATICO usa {"decision":"block"}, que APAGA
-# o prompt E a injecao da SKILL (o /bus expande a skill ANTES do hook decidir, entao continue:false
-# deixava ~134k tokens/h de contexto a toa numa sessao que nem trabalhava). Onde o operador espera
-# retorno (/bus-message) usamos continue:false+stopReason, que mostra o texto. NUNCA voltar pro
-# exit 2: ele gera card permanente com a linha de comando. Numeros medidos: ver BusBlock.
+# BLOQUEIO / CONTEXTO -- a peca central, nao mexa sem ler:
+# O tique do cron NAO e mais "/bus". Slash command EXPANDE a skill no historico ja na SUBMISSAO,
+# antes de o hook decidir: bloquear depois nao desfaz. Medido em 12/08 numa sessao com 316 defers
+# e ZERO acquires -> 353 injecoes da SKILL, ~134k tokens/h de contexto A TOA, enchendo 1M em ~7h
+# SEM TRABALHAR. Agora o cron dispara TEXTO PURO ("bus-tick: ...", ver SKILL passo 1), que nao
+# expande nada: o tique custa a frase (~17 tokens). Nos wakes REAIS o modelo carrega a skill.
+# Com a origem resolvida, o defer volta a {"continue":false} = SEM card. NUNCA use exit 2 (card
+# permanente com a linha de comando) nem volte o prompt do cron pra "/bus".
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
 $LEASE_MIN      = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
@@ -48,11 +51,12 @@ function BusBlock([string]$msg) {
     if ($msg) {
       Write-Output ((@{ 'continue' = $false; 'stopReason' = $msg } | ConvertTo-Json -Compress))
     } else {
-      # NAO combine com continue:false: MEDIDO em 12/08 22:25-22:31 -- juntos, o continue:false
-      # PREVALECE (some o card, mas a skill volta a ser injetada: +2 e +3 injecoes em 2 min em
-      # duas sessoes, com defer-lock no log). Nao existe combinacao que de card limpo E contexto
-      # limpo: e um ou outro. Escolha do operador = decision:block (contexto limpo, card por tique).
-      Write-Output '{"decision":"block","reason":""}'
+      # continue:false = NAO gera card. O que antes fazia dele a opcao ruim (a skill ficava no
+      # historico) deixou de existir: o tique agora e TEXTO PURO, entao nao ha skill pra injetar.
+      # Sobra so a bolha da propria frase (~17 tokens). Ver o bloco do passo 1 pra medicao.
+      # (decision:block APAGA o prompt, mas gera card por tique -- e sem a expansao da skill nao
+      # ha mais o que ele proteja. Nao voltar pra ele sem motivo novo.)
+      Write-Output '{"continue":false}'
     }
     exit 0
   } catch { exit 2 }   # se o JSON falhar, cai no exit 2: gera card, mas o bloqueio e garantido
@@ -140,8 +144,16 @@ try {
     BusBlock $null
   }
 
-  # 1. So gateia /bus. Qualquer outro prompt passa na hora (fast-path, custo ~0).
-  if ($prompt -notmatch '(?im)^\s*/bus(\s|$)') { exit 0 }
+  # 1. Gateia /bus (manual do operador) E o TIQUE do cron. Qualquer outro prompt passa na hora.
+  #
+  # POR QUE O TIQUE NAO E MAIS "/bus": slash command EXPANDE a skill no historico no momento da
+  # SUBMISSAO -- antes de este hook decidir. Bloquear depois nao desfaz: uma sessao ociosa que so
+  # levava defer acumulava a SKILL inteira a cada tique (medido: 353 injecoes com ZERO acquires,
+  # ~134k tokens/h de contexto a toa, enchendo 1M em ~7h SEM TRABALHAR). Como texto puro nao
+  # expande nada, o tique passou a custar so a propria frase (~17 tokens) -- ~130x menos.
+  # O prompt do cron (ver SKILL, passo 1) e auto-suficiente: manda o modelo CARREGAR a skill,
+  # o que so acontece nos wakes REAIS (1 round-trip a mais so quando ha trabalho de verdade).
+  if ($prompt -notmatch '(?im)^\s*(/bus(\s|$)|bus-tick\b)') { exit 0 }
   if (-not $sid) { exit 0 }
 
   $base = $env:CLAUDE_BUS_ROOT
