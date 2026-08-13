@@ -71,6 +71,14 @@ Diferente do tique do cron, a conclusão do monitor chega como **notificação d
 - **Reagir a push/CI** em vez de issues: troque o `snap()` por `gh run list --repo $R --limit 1 --json databaseId,status,conclusion`.
 - **Repo muito ativo**: `--limit 100` pode truncar. Suba o limite ou filtre por label/milestone no `gh issue list`.
 
-## Conta do `gh` — cuidado que vale a máquina inteira
+## Conta do `gh`: isolar em vez de revezar
 
-`gh auth switch` reescreve **um único** `hosts.yml` com **uma** chave `user:`: não é por-sessão nem por-terminal. Trocar aqui muda para todas as sessões e apps ao mesmo tempo — inclusive as que estão no meio de um push. Se precisar trocar para enxergar um repo privado, **volte para a conta de repouso ao terminar** e confirme com `gh auth status`.
+`gh auth switch` reescreve **um único** `hosts.yml` com **uma** chave `user:` — não é por-sessão nem por-terminal. Com várias sessões vigiando repos de donos diferentes, elas se atropelam: aconteceu **3 vezes num dia** numa máquina com ~20 especialistas.
+
+A mitigação por etiqueta ("troque e devolva no fim") **não resolve**: entre a troca e a devolução existe uma janela em que qualquer outra sessão que rode `gh` pega a conta errada. Pior, o sintoma engana — `Could not resolve to a Repository` / 404 parece *"o repo não existe"* e manda quem depura para o lado errado. Em cima disso, se o snapshot não validar o formato, o corpo de erro 404 vira "mudou" e o monitor dispara sozinho (ver *Cego ≠ mudou*): **uma causa, dois sintomas**.
+
+A solução é **não disputar o estado global**: `GH_CONFIG_DIR` aponta o `gh` para uma **cópia** da config, com a conta certa fixada só ali. Verificado empiricamente: com o global apontando para outra conta, o comando isolado alcançou o repo privado e o não-isolado deu 404.
+
+**Duas condições para ser seguro:**
+- **Tokens no keyring do SO** (`gh auth status` mostra `(keyring)`) — aí a cópia carrega só *qual conta usar*, não o segredo. Se a instalação guardar o token dentro do `hosts.yml`, copiar para diretório temporário/compartilhado **espalha credencial**; nesse caso use caminho privado.
+- **Recriação idempotente** — a raiz do BUS vive no `%TEMP%`/`/tmp`, que o SO limpa por idade. Por isso o passo 2 recria a cópia quando o `hosts.yml` não está lá, em vez de assumir que ela sobreviveu.

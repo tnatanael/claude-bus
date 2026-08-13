@@ -31,23 +31,35 @@ Resolva via *nome* do `/bus` (sem args) → **`PROJECT`** + **`SLUG`**.
 
 O `PROJECT` é **obrigatório** em todo handoff que você mandar — o gate serializa por projeto; sem ele o handoff entra na fila errada. Você só endereça especialistas **do mesmo projeto**.
 
-## 2. Repositório e conta
+## 2. Repositório e conta ISOLADA do `gh`
 
 Repo: use o `owner/repo` do comando; senão descubra com `git -C <dir> remote -v`.
 
-```
-gh auth status
-```
-⚠️ Com mais de uma conta logada, a errada devolve `Could not resolve to a Repository` em repo privado — parece "não existe" e é só falta de acesso.
+🔴 **NUNCA use `gh auth switch` aqui.** Ele reescreve **um único `hosts.yml` global da máquina**: troca a conta de **todas** as sessões e apps ao mesmo tempo. Com várias sessões vigiando repos de donos diferentes, elas se atropelam — e o sintoma é traiçoeiro: `Could not resolve to a Repository` / 404, que **parece "o repo não existe"** e é só falta de acesso.
 
-> 🚨 **`gh auth switch` é estado GLOBAL da máquina** (um `hosts.yml`, uma chave `user:`): troca para **todas** as sessões e apps. Se precisar trocar, **volte para a conta de repouso ao terminar** e confirme com `gh auth status`.
+Use uma **cópia isolada da config**, com a conta certa fixada **só dentro dela**:
+
+```bash
+GHC="<raiz-do-projeto-no-bus>/ghconf"      # ex.: <base>/<projeto>/ghconf
+if [ ! -f "$GHC/hosts.yml" ]; then          # idempotente: recria se o TEMP tiver sido limpo
+  mkdir -p "$GHC" && cp -r ~/AppData/Roaming/"GitHub CLI"/* "$GHC"/ 2>/dev/null || \
+  cp -r ~/.config/gh/* "$GHC"/ 2>/dev/null
+  GH_CONFIG_DIR="$GHC" gh auth switch --user <dono-do-repo>   # UMA vez, dentro da copia
+fi
+export GH_CONFIG_DIR="$GHC"                 # vale pra TODOS os gh deste shell
+gh auth status                              # confirme que é a conta esperada
+```
+
+Feito isso, **todo** `gh` deste bloco (controle, monitor, comentários) usa a conta certa **sem tocar na global** — outra sessão pode trocar a dela à vontade que a sua não quebra.
+
+⚠️ **Antes de copiar, confirme que `gh auth status` diz `(keyring)`.** Aí os tokens vivem no cofre do SO e a cópia **não duplica segredo** — só ponteiro de qual conta usar. Se a sua instalação guardar o token dentro do `hosts.yml`, **não copie para um diretório compartilhado/temporário**: aponte o `GHC` para um caminho privado seu.
 
 ## 3. Prove que o snapshot enxerga (não pule)
 
 Monitor que não vê fica **silencioso igual a monitor sem novidade**. Antes de armar:
 
 ```bash
-R=<owner/repo>
+export GH_CONFIG_DIR="$GHC"; R=<owner/repo>
 gh issue list --repo $R --state all --limit 100 --json number,state -q '.[] | "\(.number):\(.state)"' | sort
 gh api repos/$R/issues/comments --paginate -q '.[].id' 2>/dev/null | sort -n | tail -1
 ```
@@ -56,13 +68,15 @@ A lista tem que bater com a realidade, e o maior id precisa conter um comentári
 ## 4. Armar
 
 ⚠️ **Pare o monitor anterior antes** (`TaskStop <task_id>`): dois monitores do mesmo repo acordam você em duplicidade.
-⚠️ **Publique seus comentários ANTES de capturar o baseline** — senão o monitor dispara com o eco da sua própria ação.
+
+🔴 **ORDEM DO TURNO: escreva no GitHub ANTES de armar.** Vai comentar, abrir ou fechar issue nesta passada? **Faça tudo isso primeiro**, e só então capture o baseline. Armar antes faz o monitor acordar com o **eco da sua própria ação** — e você processa um "evento" que foi você mesmo. *Não basta saber a regra: o erro se repete porque a captura cai no fim de um turno longo, quando já se esqueceu do que se escreveu no começo. Se já armou e ainda falta comentar: pare o monitor, comente, rearme.*
 
 Rode com `run_in_background: true`:
 
 🔴 **"Não consegui ler" é um TERCEIRO estado — nunca o compare.** Quando a API falha, ela devolve um **corpo de erro**: não-vazio e diferente do baseline. Comparar string crua faz isso virar `MUDOU_NO_GITHUB` e disparar handoff **sem evento nenhum** — aconteceu duas vezes em produção (conta do `gh` trocada por outra sessão; 404 transitório). Por isso o `snap()` **valida o próprio formato** e falha com `return 1`, e o laço conta leituras cegas em vez de comparar lixo.
 
 ```bash
+export GH_CONFIG_DIR="$GHC"   # conta isolada (passo 2) -- sem isso o monitor herda a conta global
 R=<owner/repo>
 snap() {
   local issues cid
@@ -149,7 +163,9 @@ O handoff é **unidirecional**: o especialista responde **no ticket**, não de v
 2. `docs/conventions.md` + os hooks em `.githooks/`;
 3. **não achou nenhum? PERGUNTE ao operador antes de despachar** — não invente regra de qualidade.
 
-Achou? Então **em CADA handoff** inclua: *"siga as regras do `<arquivo>` deste projeto"*. Se você mantém mais de um repo/projeto, **guarde o caminho no estado** (passo 6) pra não reprocurar nem errar depois.
+Achou? Então **em CADA handoff** inclua: *"siga as regras do `<arquivo>` deste projeto"*, e **guarde o caminho no `rules_file` do estado** (passo 6) pra não reprocurar.
+
+🔴 **O `rules_file` é POR PROJETO e não pode vazar entre projetos.** O arquivo de estado vive na raiz do projeto no BUS justamente por isso — cada projeto tem o seu. Vigia mais de um repo? **Leia o `rules_file` do estado DAQUELE projeto antes de cada handoff**; nunca reaproveite o da última issue que você tratou. O especialista **obedece** ao que vier no handoff, sem conferir se aquele documento é o do time dele: apontar pro errado não dá erro, dá trabalho feito sob a política de outro time.
 
 ⚠️ **Assinatura é obrigatória:** se todas as sessões usam a mesma conta `gh`, o autor no GitHub é sempre o mesmo — a assinatura é a **única** coisa que diz quem falou.
 
