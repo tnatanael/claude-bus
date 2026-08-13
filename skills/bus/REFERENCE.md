@@ -2,6 +2,17 @@
 
 Este arquivo NÃO é injetado a cada `/bus` — o `SKILL.md` carrega só o núcleo operacional. Aqui fica o **porquê** de cada peça, pra debug/manutenção sem inflar o contexto de toda passada.
 
+## Limitações operacionais (saíram do SKILL.md — não são regra de execução)
+- **Projeto = isolamento.** Só vê/endereça quem está no mesmo projeto.
+- **Sessão precisa estar ABERTA.** O cron é de sessão: morre com o app. Reabriu → `/bus <projeto> <slug>`, ou `/bus-reload` só pra religar o cron.
+- **Entrega é automática:** o cron do destino processa sozinho — não anuncie nem peça `/bus` manual. Destino fechado → o handoff espera no inbox dele (visível no dashboard) até reabrir.
+- **Sem auto-continuação:** o gate só libera o tique quando há trabalho **seu** (inbox **ou** preso em `processing/` há ≥30 min). Tarefa longa que não fecha num wake precisa de **self-handoff** — não existe "próximo tick" gratuito com inbox vazio.
+- **Fim do fluxo:** quem declara é o **controlador (prio 0)**; inbox vazio dos outros ≠ projeto acabado.
+- **`/bus-message <texto>`** enfileira instrução do operador **sem acordar o modelo** (o hook escreve o handoff e bloqueia o prompt). **`/bus-reload`** re-arma só o cron.
+
+## Por que a SKILL é curta (e precisa continuar)
+A SKILL é **re-injetada como mensagem de usuário a cada `/bus`**, e **cada cópia fica no histórico**. Medido em 12/08/2026 numa sessão real: **~60 injeções/hora** (tique de 1 min) — com a SKILL em 19 KB isso era **~286k tokens/hora só de re-injeção**, o que enche uma janela de 1 M em ~3h30 **antes de qualquer trabalho**. Sessões chegaram a ter **47% do transcript** só de cópias da SKILL, e o sintoma final é `Prompt is too long` com compactação em cascata (a compactação devolvia ~950 KB num teto de 1 M, estourando no turno seguinte). Por isso a SKILL foi cortada de 19 KB → ~9 KB (v0.7.9): **todo "porquê" mora aqui**, que não é injetado. **Regra:** antes de acrescentar parágrafo no `SKILL.md`, pergunte se é *execução* (fica) ou *explicação* (vem pra cá). Cada KB no SKILL custa ~250 tokens × centenas de passadas por dia.
+
 ## Por que economia de tokens importa aqui
 O custo **fixo** de uma passada de PROCESSAMENTO (SKILL injetada + dança de cron + leitura do inbox) domina o corpo marginal de um handoff em ~9:1. Logo, a maior alavanca é **reduzir o número de wakes** (não o tamanho do corpo): um spec completo executado numa passada vale muito mais que a mesma frente fatiada em vários round-trips. Daí a doutrina do `SKILL.md` §3 (um spec/uma passada, sem ack, sem status avulso) e §5 (controlador consolida).
 

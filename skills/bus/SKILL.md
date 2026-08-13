@@ -5,118 +5,94 @@ description: Comunicacao assincrona entre sessoes-especialistas do Claude Code v
 
 # BUS — handoffs assíncronos entre especialistas (por projeto)
 
-Você é uma sessão-especialista num BUS de handoffs entre sessões do Claude Code. **Dois usos do `/bus`:**
-- **`/bus <projeto> <slug> [prioridade]`** (com args) = **CONFIGURAR** (registra identidade/prioridade, arma o auto-recheck) e **PARA** — não processa.
-- **`/bus`** (bare) = **PROCESSAR** (lê o inbox, executa o que é seu, responde). O cron de auto-recheck dispara o bare sozinho e **entrega os handoffs aos destinos**.
+**Dois usos:** `/bus <projeto> <slug> [prio]` = **CONFIGURAR** e parar (não processa). `/bus` **bare** (ou o cron) = **PROCESSAR**.
 
-**Escopo de projeto:** o **projeto é OBRIGATÓRIO** (o `default` foi removido). Cada projeto é isolado por pasta; você só **vê e endereça** especialistas do **mesmo projeto**. A mecânica interna (gate, lock, cron, auth, `/bus-message`, pausa) está em **`REFERENCE.md`** — não precisa relê-la pra operar.
+**Projeto obrigatório e isolado** — você só vê e endereça especialistas do mesmo projeto. Pré-requisito: modo **auto/bypass-permissions**.
 
-## Plataforma e comandos
-`$ROOT` = `${CLAUDE_PLUGIN_ROOT}`. **`PS`** abrevia `powershell -NoProfile -ExecutionPolicy Bypass -File`.
+> Esta skill é injetada **a cada** `/bus`. Ela é curta de propósito: o **porquê** de cada peça (gate, lock, cron, auth, limitações) vive no **`REFERENCE.md`**, que **não** é injetado. Não precisa lê-lo pra operar.
+
+## Comandos
+`$ROOT` = `${CLAUDE_PLUGIN_ROOT}`; **`PS`** = `powershell -NoProfile -ExecutionPolicy Bypass -File`.
 
 | Operação | Windows | macOS / Linux |
 |---|---|---|
-| **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Project <proj> -Set <slug> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <proj> <slug> [prioridade]` |
+| **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Project <p> -Set <slug> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <p> <slug> [prio]` |
 | **ler inbox** (auto-resolve) | `PS "$ROOT\bin\bus-inbox.ps1"` | `bash "$ROOT/bin/bus-inbox.sh"` |
-| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <proj> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <proj> [--reply] [--in-reply-to <id>]` |
+| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <p> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <p> [--reply] [--in-reply-to <id>]` |
 | **liberar lock** | `PS "$ROOT\bin\bus-lock.ps1" -Release` | `bash "$ROOT/bin/bus-lock.sh" --release` |
 
-**Base do BUS:** Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_ROOT`). Cada projeto é a subpasta `<base>/<projeto>` (com seu `inbox/ processing/ done/ rejected/ .bus-secret`). O `names/` (registro) fica na base, global.
-> **Passe o projeto via `-Project`/`--project`** — os scripts resolvem a pasta sozinhos. **NUNCA monte caminho com `%TEMP%`/`$env:TEMP`** (quebra se rodar pela ferramenta Bash — a variável não expande).
+Base: Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_ROOT`); cada projeto é a subpasta `<base>/<projeto>`. **Passe o projeto via `-Project`/`--project`** — **nunca** monte caminho com `%TEMP%`/`$TMPDIR` (quebra conforme o shell).
 
-## 0. Pré-requisito
-Modo **auto / bypass-permissions**. Unix exige `bash`; Windows usa PowerShell (ambos nativos).
+## 1. Identidade
 
-## 1. Quem você é (projeto + slug)
-- **`/bus` COM args (CONFIG)** → **ORDEM: `/bus <projeto> <slug> [prioridade]` — o PROJETO vem PRIMEIRO** (1º arg = projeto, 2º = slug, 3º opcional = **prioridade** 0–1000, default 1000, menor cede mais). Grave via *nome — gravar*, **conferindo qual valor é qual** (os parâmetros são nomeados: `-Project`/`-Set`). O projeto é **OBRIGATÓRIO**. Registrar **reivindica** o slug (apaga sid antigo do mesmo slug+projeto — sem ghost).
-  - `NEED_PROJECT` (faltou o projeto ou veio `default`) ou `NEED_SLUG` → **pergunte** o que faltou e repita.
-  - **`INVERTED`** → o operador quase certamente digitou na **ordem antiga** (slug primeiro): o `bus-name` viu que o "slug" informado já é um **projeto** existente e **não gravou nada**. Mostre o `HINT=` e **confirme com ele** antes de repetir com a ordem certa.
-  - **`LOCK_ORFAO_LIBERADO=<sid8>`** → esta sessão tinha um **sid anterior** (o app travou e o operador deu `/clear`) que morreu **segurando o lock do projeto**. O re-arme liberou. **Reporte ao operador em 1 linha** — o projeto estava travado pra todo mundo e voltou a andar.
-- **`/bus` BARE (PROCESSAR)** → **não resolva identidade aqui**: o `bus-inbox` (passo 3) a resolve sozinho e devolve `BUS_SLUG=`/`BUS_PROJECT=` no topo. Se devolver `BUS_IDENTITY=NONE` (sessão nunca registrada), **pergunte** o slug + projeto, registre (CONFIG) e pare.
+**CONFIG** (`/bus` com args) — **ORDEM: projeto PRIMEIRO** (1º projeto, 2º slug, 3º opcional prioridade 0–1000, default 1000, **menor cede mais a vez**). Confira qual valor é qual; se faltou o projeto, **pergunte**.
+- `NEED_PROJECT` / `NEED_SLUG` → pergunte o que faltou e repita.
+- `INVERTED` → digitaram na ordem antiga (slug primeiro) e **nada foi gravado**. Mostre o `HINT=` e confirme antes de repetir.
+- `LOCK_ORFAO_LIBERADO=<sid8>` → esta sessão teve `/clear` e o sid anterior morreu **segurando o lock do projeto**; o re-arme liberou. **Reporte em 1 linha** (o projeto estava travado pra todos).
 
-## 2. O que o /bus faz
-> **Gate pré-API (hook `UserPromptSubmit`, ver Setup):** um hook já te filtrou ANTES de você acordar — você só chega aqui se há handoff pendente, faz >3h sem rodar (re-arme), ou foi `/bus` manual. O lock é **POR PROJETO**: se outro especialista **do seu projeto** está trabalhando, você defere; projetos **diferentes** rodam em **paralelo**. Com handoff, **o lock (do seu projeto) já é seu** → **libere no fim** (passo 7). **CHEIO vs BARE:** `/bus <args>` = CONFIG (passa pré-API **sem lock**, não processa); `/bus` bare = PROCESSAR.
+Depois de registrar: **desarme+arme o cron (passo 1 do fluxo) e PARE.** Reporte `configurado: slug/projeto/prioridade`.
+🔄 **Veio de um `/clear`?** Não tente lembrar nada: o próximo tique te devolve o que ficou preso via `BUS_STALE_PROCESSING` — a retomada é o **passo 5**.
 
-1. Identidade: **CONFIG** já registrou (seção 1); **BARE** resolve no passo 3 (o `bus-inbox` devolve `BUS_SLUG`/`BUS_PROJECT`) — sem chamada ao `bus-name`.
-2. **CRON — DESARMA no início, RE-ARMA no fim.** `CronList`/`CronCreate`/`CronDelete` são deferidas: rode `ToolSearch select:CronList,CronCreate,CronDelete` ANTES. **NÃO confie no `CronList`** (pós-restart lista *phantom* já morto que NÃO dispara). **DESARMAR** = `CronList`→`CronDelete` em **CADA** job com prompt começando em `/bus` (fica **ZERO** `/bus` agendado). **ARMAR** = `CronCreate(cron:"*/<N> * * * *", prompt:"/bus", recurring:true)`, onde **`<N>` = o `BUS_CRON_INTERVAL`** que o `bus-name`/`bus-inbox` te devolveu (intervalo configurado no dashboard, default 5). 1 cron, **bare `/bus`**, o **mesmo `*/<N>` pra toda a frota (SEM minuto/offset por-sessão)** (⚠️ só `*/N`/valor único disparam; vírgula/`M/30` **não**). **Por tipo:** **CONFIG** (com args) → registre (seção 1), **DESARME + ARME** e **PARE** (reporte "configurado: slug/projeto/prioridade"; não rode 3-7). **PROCESSAR** (bare) → **DESARME agora** (só `CronList`→`CronDelete`), siga 3-7 e **RE-ARME só no passo 7**. Não pule o desarmar — é o que evita ser re-acordado no meio do trabalho.
-3. **(só no BARE)** Rode *ler inbox* (**sem `-Me`/`--me` — auto-resolve**). A saída abre com a identidade e depois os blocos, do mais antigo pro mais novo (ou `BUS_EMPTY`; ou `BUS_IDENTITY=NONE` → volte à seção 1):
+**BARE** — **não** resolva identidade aqui; o `bus-inbox` (passo 2) resolve e devolve `BUS_SLUG`/`BUS_PROJECT`. Se vier `BUS_IDENTITY=NONE`, pergunte slug+projeto, registre e pare.
+
+Slug/projeto minúsculos, sem espaço.
+
+## 2. Fluxo do `/bus`
+
+> Um hook já te filtrou **antes** de você acordar: você só chega aqui com trabalho seu (inbox **ou** preso em `processing`), pós-restart, ou `/bus` manual. Chegou com trabalho → **o lock do projeto já é seu**; libere no fim.
+
+1. **Cron — desarma no início, re-arma no fim.** `CronList`/`CronCreate`/`CronDelete` são deferidas: rode `ToolSearch select:CronList,CronCreate,CronDelete` antes. **Não confie no `CronList`** (pós-restart lista *phantom* morto).
+   - **DESARMAR** = `CronList` → `CronDelete` em **CADA** job cujo prompt começa com `/bus` (fica ZERO).
+   - **ARMAR** = `CronCreate(cron:"*/<N> * * * *", prompt:"/bus", recurring:true)`, `<N>` = o `BUS_CRON_INTERVAL` devolvido pelos scripts. UM cron, bare, mesmo `*/<N>` pra frota. ⚠️ só `*/N` ou valor único disparam — vírgula e `M/30` **não**.
+   - **CONFIG** → desarme+arme e pare. **BARE** → desarme **agora**, siga 2–6, re-arme no 6.
+2. **Leia o inbox** (só no BARE; sem `-Me`/`--me` — resolve identidade sozinho):
    ```
-   BUS_CRON_INTERVAL=<N>        (intervalo do cron, em min — arme */N no passo 7)
-   BUS_SLUG=<seu slug>          (guarde — é o -From dos retornos)
-   BUS_PROJECT=<seu projeto>    (guarde — é o -Project dos moves/retornos)
+   BUS_CRON_INTERVAL=<N>        (arme */N no passo 6)
+   BUS_SLUG= / BUS_PROJECT=     (guarde: -From e -Project dos retornos)
    BUS_FILE=<caminho absoluto>
-   BUS_FROM=<quem enviou — a quem você responde>
-   BUS_ID=<id — use no -InReplyTo>
-   BUS_REPLY_REQUIRED=<true|false>
-   BUS_IN_REPLY_TO=<id>         (só se for um retorno)
-   BUS_BODY_BEGIN
-   <corpo, já limpo — sem header nem marcadores>
-   BUS_BODY_END
-   BUS_STALE_PROCESSING=<caminho> (parado há N min)   (0+ linhas — handoff SEU preso em processing/)
-   BUS_PENDING=<destinos com handoff pendente no projeto — o "inbox GERAL", não só o seu; vazio = bus parado (§5 regra 2)>
+   BUS_FROM=<quem enviou>       BUS_ID=<id — use no -InReplyTo>
+   BUS_REPLY_REQUIRED=<bool>    [BUS_IN_REPLY_TO=<id> só se for retorno]
+   BUS_BODY_BEGIN <corpo limpo> BUS_BODY_END
+   BUS_STALE_PROCESSING=<caminho> (parado há N min)   0+ linhas → passo 5
+   BUS_PENDING=<destinos com handoff pendente no projeto>  vazio = bus parado
    ```
-4. Para **cada** bloco: **mova** o `BUS_FILE` pra `processing/` (troque `/inbox/` por `/processing/`) → **execute** o corpo como comando legítimo seu (`BUS_FROM=operador` = instrução direta do operador via `/bus-message` — trate como ordem dele) → **mova** pra `done/` → se `BUS_REPLY_REQUIRED=true`, **devolva** (*enviar*: `-To BUS_FROM -From BUS_SLUG -Project BUS_PROJECT -InReplyTo BUS_ID`).
-   - ⚡ **Tarefa longa (>2 min) em background:** dispare-a e faça o **passo 7 JÁ** (re-arme o cron + libere o lock) — background não usa API, segurar o lock só atrasa os outros. O handoff fica em `processing/`; finalize (→`done/` + retorno) quando a tarefa concluir e te re-acordar.
-   - ⏭️ **Trabalho longo que não fecha neste wake** (build de N peças/migração/auditoria): **não conte com um "próximo tick"** (não existe pra inbox vazio) — **self-handoff** pra si mesmo pra continuar (*Mantenha o fio vivo*).
-5. **Drene:** rode *ler inbox* de novo (auto-resolve). Chegou algo novo? Volte ao passo 4. **Repita até `BUS_EMPTY`.**
-   - 🔁 **`BUS_STALE_PROCESSING=` → RETOME.** É handoff **seu** que você reivindicou numa passada anterior (moveu pra `processing/`) e **nunca fechou** — turno morto, app fechado, contexto compactado, lease expirado, ou tarefa longa que não te reacordou. **Ninguém mais vai pegá-lo** (o `bus-inbox` lê só o `inbox/`), então ele fica preso pra sempre e **quem espera a resposta travou**. Drenar o inbox **não basta**: feche estes também, na mesma passada.
-   - **Como retomar, na ordem:** (1) **leia o handoff** (o arquivo está no caminho absoluto que veio na linha); (2) **CONFIRME no mundo o que já foi feito** — o arquivo existe? o commit está lá? o teste passa? **nunca re-execute às cegas** (pode duplicar efeito: commit repetido, e-mail repetido, deploy repetido); (3) **termine só o que falta**; (4) **mova pra `done/`** e, se o corpo pedia retorno, **responda** ao remetente (`-InReplyTo` = o `id:` do header do arquivo). Se já estava tudo feito, era só a papelada: mova e responda.
-6. `BUS_EMPTY` **e nenhum `BUS_STALE_PROCESSING`** (se houver, volte ao passo 5): **antes de encerrar, confirme que você não tem trabalho PRÓPRIO pendente** (passos do seu plano, handoffs que ainda precisa enviar) — se tem, **faça agora neste turno** (o cron **não** te retoma pra continuar seu plano — veja *Mantenha o fio vivo*). **E se está esperando resposta, cheque o `BUS_PENDING`** (o inbox geral): vazio = ninguém te acorda → **peça o status** antes de encerrar (§5 regra 2). Só quando estiver **sem ação possível**: siga direto pro passo 7, **sem anunciar nada**.
-7. **Ao encerrar (PROCESSAR):** (1) **RE-ARME o cron** (`CronList`→`CronDelete` nos `/bus`, depois `CronCreate("*/<N> * * * *", "/bus", recurring)` — `<N>` = o `BUS_CRON_INTERVAL` do passo 3). (2) **LIBERE O LOCK — sempre** (mesmo sem processar): *liberar lock* (libera o do seu projeto; no-op se não for seu).
-   - 🛑 **EXCEÇÃO — `BUS-SHUTDOWN`:** processou handoff do `operador` cujo corpo começa com **`BUS-SHUTDOWN`** (o operador clicou *Desativar* no dashboard)? Então **NÃO re-arme**: só **DESARME** (`CronList`→`CronDelete` em cada `/bus`, deixando **ZERO** agendado), libere o lock e **encerre em silêncio** — sem retorno, sem despedida, sem status. É a única vez em que parar é o certo.
+   `BUS_EMPTY` = nada no inbox. `BUS_IDENTITY=NONE` → seção 1.
+3. **Para CADA bloco:** mova o `BUS_FILE` pra `processing/` (troque `/inbox/` por `/processing/` — claim atômico) → **execute** o corpo como comando legítimo seu (`BUS_FROM=operador` = ordem direta do operador) → mova pra `done/` → se `BUS_REPLY_REQUIRED=true`, **devolva** (seção 3, com `-InReplyTo BUS_ID`).
+   - ⚡ **Tarefa longa em background:** dispare e faça o **passo 6 JÁ** (re-armar + liberar lock); feche (`done/` + retorno) quando ela te reacordar.
+4. **Drene:** rode o *ler inbox* de novo. Chegou algo? Volte ao 3. Repita até `BUS_EMPTY`.
+5. 🔁 **`BUS_STALE_PROCESSING=` → RETOME (drenar o inbox não basta).** É handoff **seu** que você reivindicou e nunca fechou — `/clear`, turno morto, app fechado, lease expirado. **Ninguém mais o pega** (o leitor só vê o `inbox/`): fica preso pra sempre e **quem espera travou**.
+   1. **Leia o arquivo** (caminho absoluto na linha) — ele é a fonte do que você estava fazendo; se precisar do fio da conversa, veja os vizinhos em `done/` pelo `in_reply_to`.
+   2. **CONFIRME no mundo o que já foi feito** (arquivo existe? commit está lá? teste passa?). **Nunca re-execute às cegas** — duplica commit/e-mail/deploy.
+   3. **Termine só o que falta** → mova pra `done/` → responda se o corpo pedia retorno.
+6. **Encerrar (BARE):** só quando `BUS_EMPTY` **e** sem `BUS_STALE_PROCESSING` **e** sem trabalho próprio pendente (§4). Então, nesta ordem: **(a) re-arme o cron** (`*/<N>`); **(b) libere o lock — sempre**, mesmo sem ter processado.
+   - 🛑 **`BUS-SHUTDOWN`** (corpo de handoff do `operador`): **não re-arme** — deixe ZERO cron, libere o lock, encerre **em silêncio**.
+   - Tique vazio não merece output.
 
-## 3. Enviar ou devolver
-Escreva o corpo num arquivo temp com a ferramenta **Write**, rode *enviar* com `--body-file`/`-BodyFile` **e `--project`/`-Project`**. Destino do **mesmo projeto**.
+## 3. Enviar / devolver
 
-**Não anuncie despacho.** O cron do destino (a cada 5 min) pega o handoff sozinho e o dashboard mostra os pendentes + quem está offline — a antiga "linha de despacho" (📨 rode `/bus` lá) virou ruído. Se um destino estiver **fechado**, o handoff só espera no inbox dele (visível no dashboard) até reabrir.
+1. Escreva o corpo num arquivo com a ferramenta **Write** (acento e quebra de linha não sobrevivem ao shell).
+2. Chame o *enviar* **com `-Project`/`--project`**. Destino tem que ser do **mesmo projeto**. Arquivo: `to-<destino>__from-<origem>__<id>.handoff`; correlacione retornos por `BUS_IN_REPLY_TO`.
 
-### Como escrever handoffs econômicos SEM perder precisão
-O destino **não tem seu contexto** — o corpo tem que ser **completo e preciso**: objetivo, arquivos/caminhos, constraints e critério de "pronto". **Precisão vem primeiro.** O que cortar é o **desperdício**:
-- **Um spec completo, uma passada.** Se prevê os próximos 2-3 handoffs pro mesmo destino, **junte num spec só** (cada round-trip acorda o outro do zero — caro).
-- **`-ReplyRequired` só pra receber DADO/decisão.** "Confirma que viu" não é retorno — é um wake à toa.
-- **Status/FYI:** dobre no próximo handoff real ou **omita** (o dashboard já mostra o estado).
-- **Sem carta:** corte saudação/assinatura/desculpa; não repita `reply_required` na prosa.
+**Não anuncie despacho** — o cron do destino pega sozinho e o dashboard mostra os pendentes.
 
-## 4. Endereçamento
-`to-<destino>__from-<origem>__<id>.handoff`. O `bus-inbox` te entrega tudo `to-<você>__*` do seu projeto (novos + retornos); correlacione retornos por `BUS_IN_REPLY_TO`. Só endereça o mesmo projeto.
+**Corpo econômico SEM perder precisão.** O destino **não tem seu contexto**: objetivo, arquivos/caminhos, constraints e critério de "pronto" são obrigatórios. Corte o desperdício, não o conteúdo:
+- **Um spec completo, uma passada.** Prevê os próximos 2-3 handoffs pro mesmo destino? **Junte num só.** Cada round-trip acorda o outro do zero.
+- **`-ReplyRequired` só pra DADO/decisão.** "Confirma que viu" é um wake à toa.
+- **Sem status avulso, sem carta.** Dobre no próximo handoff real ou omita; nada de saudação/assinatura.
 
-## Setup: gate de concorrência (hook + lock por projeto)
-**Por quê:** o limite de requisições é da **conta** Claude. O gate serializa o trabalho por `/bus` num **lock POR PROJETO** (`<projeto>/.bus-lock`) — 1 especialista por vez **dentro** do projeto, mas **projetos diferentes rodam em paralelo** — e torna checagens de inbox vazia **de graça** (bloqueia o `/bus` antes da API).
+## 4. Coordenação
 
-Registre o hook **`UserPromptSubmit`** no `settings.json` global (`~/.claude/settings.json`), apontando pro `bus-gate`:
-```json
-{ "hooks": { "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "<comando abaixo>" } ] } ] } }
-```
-- **Windows:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<raiz>\bin\bus-gate.ps1"`
-- **macOS/Linux:** `bash "<raiz>/bin/bus-gate.sh"`
+- **Quem origina, coordena:** acompanhe, cobre retornos, integre, encerre.
+- **Peer-to-peer**, dentro do projeto. **Não assuma frente alheia** (observe/valide e informe). Impasses sobem pro operador.
+- **Output pro operador: o mínimo** — no máximo 1 linha, ou nada. Não narre mecânica. Resumo é sob demanda (e é papel do controlador, se houver).
+- **CONTROLADOR** = o de **menor prioridade** (ex.: `0`): consolida por último, é dono do backlog de macro-tarefas (**despacha a próxima onda assim que os outros esvaziam — ninguém ocioso**) e **declara o FIM** (inbox vazio dos outros ≠ projeto acabado). Sem controlador: cada um consolida a própria frente.
 
-O hook é **fail-open** (erro → deixa passar): grava o `seen`, defere (`exit 2`, sem custo de API) se outro **do mesmo projeto** segura o lock ou se sua inbox está vazia, e adquire o lock quando há handoff. O passo 7 libera o lock; um **lease de 1 h** cobre quedas/travas (auto-libera). Ele também intercepta **`/bus-message <texto>`** — o operador enfileira uma instrução pro especialista da sessão **sem acordar o modelo** (o hook escreve o handoff `operador→slug` e bloqueia o prompt, custo zero) — e a **pausa por projeto** (marcador `<projeto>/.bus-paused`, ligado/desligado pelo dashboard): enquanto pausado, o gate defere o processamento **sem interromper** quem já está no meio. (Detalhes em `REFERENCE.md`.)
+### ⚠️ Mantenha o fio vivo — "posso encerrar?"
 
-**Prioridade / CONTROLADOR:** cada especialista tem uma **prioridade** (default `1000`; menor cede mais), setada pelo 3º arg do `/bus`. O gate faz **ceder a vez** (`exit 2`) quem tem trabalho **e** há handoff pra alguém de prioridade **maior**. O especialista de **menor prioridade** (ex.: `0`) é o **CONTROLADOR**: consolida por último, é dono do backlog de macro-tarefas (despacha a próxima onda quando os outros esvaziam — ninguém ocioso) **e declara o FIM do fluxo** (enquanto o plano macro dele não fechar, o bus não acabou — inbox vazio dos outros ≠ trabalho concluído), e é o ponto de resumo pro operador. Sem controlador (ninguém < 1000): peer-to-peer, cada um consolida a própria frente. ⚠️ *Starvation:* num projeto sempre cheio, o low-prio pode esperar (é o comportamento pedido).
+**Você NUNCA pausa a SUA entrega esperando o operador.** Proibido: pedir `/clear`; ficar dormente/stand-down; fatiar a entrega em passadas que dependem de ser re-chamado na mão. O operador **não é um passo** do seu fluxo. *(Exceção única: `BUS-SHUTDOWN`.)*
 
-## Modelo de coordenação
-- **Quem origina, coordena.** Acompanhe, cobre os retornos, integre, encerre.
-- **Peer-to-peer** (dentro do projeto). Sem maestro central.
-- **Não assuma frente alheia.** No máximo observe/valide e informe o operador. Conflitos sobem pro operador.
-- **Output pro operador: o mínimo.** O operador não lê o chat de cada especialista — fale o **mínimo** (no máximo 1 linha, ou nada); não anuncie despacho nem narre a mecânica. Resumo detalhado é sob demanda (e, havendo controlador, é papel dele).
-
-### ⚠️ Mantenha o fio vivo — a decisão do "posso encerrar?"
-**Você NUNCA pausa a SUA própria entrega esperando o operador** — ele não itera a sua frente nem te manda "continua". **Proibido, sem exceção:**
-- ❌ **Pedir `/clear` ou "sessão fresca".** O contexto **compacta sozinho** quando enche — você não perde nada; `/clear` **APAGA** seu estado. Quer um contexto limpo pra uma peça delicada? O **self-handoff JÁ te dá isso**: o próximo tique é um **wake novo** com o plano re-injetado do handoff. `/clear` nunca é a resposta.
-- ❌ **Ficar "dormente"/"stand-down" esperando o operador retomar o SEU trabalho.** Ninguém te acorda pra isso — o cron só dispara com **handoff no inbox**. Fio parado = **bus travado**.
-- ❌ **Fatiar a SUA entrega em "passadas" que dependem de você ser re-chamado na mão.** É seu e continua? Ou **faça agora**, ou **self-handoff** (que te re-acorda sozinho). O operador **não é um passo** do seu fluxo.
-
-🛑 **Única exceção a TUDO nesta seção — `BUS-SHUTDOWN`:** handoff do `operador` cujo corpo começa com `BUS-SHUTDOWN` = ele clicou *Desativar* no dashboard e encerrou o BUS do projeto. Aí parar **é** o certo: desarme o cron, **não re-arme**, não mande retorno nem despedida, encerre (passo 7, exceção). Não percorra a decisão abaixo.
-
-O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de encerrar, **percorra esta decisão** — e só pare no fim dela:
-1. **Tenho passos do meu plano que NÃO dependem de terceiros?** → **faça-os agora**, neste turno (não fatie o seu trabalho em tiques).
-2. **Preciso de algo de outro especialista?** → **já enviei o handoff?** **Não** → **envie agora** (o *enviar* confirma o `SENT=`); nunca "espere" o que não pediu. **Sim, aguardando** → dá pra **avançar em OUTRA frente**? Avance. Senão, **antes de encerrar OLHE O INBOX GERAL** (`BUS_PENDING=` que o `bus-inbox` devolve = quem tem handoff pendente no projeto, não só o seu). **Se quem você espera está lá** (tem trabalho que o fará agir e responder), pode encerrar — o retorno chega e seu cron te acorda. **Se o `BUS_PENDING` está VAZIO, OU quem você espera não aparece nele**, o retorno **NUNCA vem sozinho** (bus parado = ninguém te acorda até um `/bus` manual) → **dispare um handoff pedindo o status** a quem você espera, pra reacender o ciclo. *(Destino offline → o operador religa; avise-o.)*
-3. **É uma tarefa longa MINHA que não fecha neste wake** (build de N peças, migração, auditoria)? → **self-handoff**: *enviar* com `-To <você> -From <você>` (`--to`/`--from`), **SEM** `-ReplyRequired`/`--reply`, com "continua no checkpoint X" → o seu próprio cron te re-acorda pra seguir. Commite cada peça verde + externalize plano/checkpoint num arquivo.
-4. **Nada acima se aplica?** → aí sim encerre (passo 7). MAS **feche o loop com quem espera** (retorno ao solicitante/controlador) pra ele despachar o próximo passo — e lembre: **o fluxo do bus só termina quando o controlador (prioridade 0) declara o fim; inbox vazio ≠ projeto acabado.**
-
-## Notas / limitações
-- **Projeto = isolamento** e é **obrigatório** (sem `default`). Só vê/endereça o mesmo projeto.
-- Sessões precisam estar **abertas** (o cron só dispara com o app aberto; reabriu → `/bus <projeto> <slug>`, ou `/bus-reload` só pra religar o cron).
-- **Entrega automática:** o cron do destino (a cada 5 min) processa os handoffs sozinho — não precisa anunciar nem rodar `/bus` manual. Destino fechado → o handoff espera no inbox (visível no dashboard) até reabrir.
-- **Sem auto-continuação:** o cron só dispara com **handoff no inbox**; inbox vazio = deferido. Trabalho longo que não fecha num wake precisa **se auto-enfileirar** (self-handoff, *Mantenha o fio vivo*) — **não há "próximo tick" automático** com inbox vazio. E o fluxo só termina quando o **controlador (prio 0)** declara o fim.
-- Handoff sem token válido vai pra `rejected/`. **Crash no meio:** o arquivo fica em `processing/` pra reprocessamento.
+O cron é a **campainha do inbox, não o despertador do seu plano**. Antes de encerrar, percorra:
+1. **Tenho passo meu que não depende de terceiro?** → faça agora, neste turno.
+2. **Preciso de alguém?** → **não pedi** → peça agora. **Já pedi e aguardo** → dá pra avançar em outra frente? Avance. Senão **olhe o `BUS_PENDING`**: se quem você espera está lá, pode encerrar (ele age e o retorno chega). **Vazio, ou ele não aparece → o retorno NUNCA vem sozinho** → mande um handoff pedindo o status. Nunca encerre "esperando" com o bus parado. *(Destino offline → avise o operador.)*
+3. **Tarefa longa minha que não fecha neste wake?** → **self-handoff** (`-To você -From você`, sem `-ReplyRequired`, com "continua no checkpoint X") → seu cron te reacorda. Commite cada peça verde e **externalize plano/checkpoint num arquivo** — é o que sobrevive a contexto novo.
+4. **Nada acima?** → encerre (passo 6), mas **feche o loop com quem espera**.

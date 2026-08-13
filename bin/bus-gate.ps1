@@ -250,6 +250,17 @@ try {
 
   $inbox = Join-Path $projRoot 'inbox'
   $myPending = $false; $higherPending = $false; $higherSlug = ''
+  # TRABALHO PRESO EM processing/ TAMBEM E TRABALHO. Handoff que EU reivindiquei e nunca fechei
+  # (turno morto, /clear, app fechado) nao esta mais no inbox -- entao, sem isto, o gate via
+  # "inbox vazia", bloqueava o tique, e a sessao NUNCA se recuperava sozinha: ficava presa com
+  # o BUS_STALE_PROCESSING que ela nem chegava a ler. E o caminho de volta depois de um /clear.
+  # So conta o ANTIGO (>=30min, igual ao bus-inbox) pra nao reagir ao que esta em voo agora.
+  try {
+    foreach ($pc in (Get-ChildItem -LiteralPath (Join-Path $projRoot 'processing') -File -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Extension -eq '.handoff' -and $_.Name.StartsWith('to-' + $slug + '__') })) {
+      if (((Get-Date) - $pc.LastWriteTime).TotalMinutes -ge 30) { $myPending = $true; break }
+    }
+  } catch {}
   if (Test-Path -LiteralPath $inbox) {
     foreach ($c in (Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like 'to-*' })) {
       $txt = Get-Content -LiteralPath $c.FullName -Raw -ErrorAction SilentlyContinue
