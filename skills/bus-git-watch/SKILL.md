@@ -112,7 +112,17 @@ O pedido:
 <levantamento anterior, entrada de roadmap, regras do projeto>
 ```
 
-O handoff é **unidirecional**: o especialista responde **no ticket**, não de volta pra você. Se o projeto tem um documento de regras (ex.: um `GATE.md`), **inclua em todo handoff a instrução de segui-lo**.
+O handoff é **unidirecional**: o especialista responde **no ticket**, não de volta pra você.
+
+### Regras de qualidade — localize as DO PROJETO antes do primeiro handoff
+
+**Cada projeto tem as suas, e o gate de um não governa o outro.** **Não presuma o caminho:** apontar pro documento errado faz o especialista seguir a política de **outro time** — e ele vai obedecer, porque veio de você. Procure nesta ordem:
+
+1. documento de regras na raiz do repo (`GATE.md`, `CONTRIBUTING.md`, equivalente);
+2. `docs/conventions.md` + os hooks em `.githooks/`;
+3. **não achou nenhum? PERGUNTE ao operador antes de despachar** — não invente regra de qualidade.
+
+Achou? Então **em CADA handoff** inclua: *"siga as regras do `<arquivo>` deste projeto"*. Se você mantém mais de um repo/projeto, **guarde o caminho no estado** (passo 6) pra não reprocurar nem errar depois.
 
 ⚠️ **Assinatura é obrigatória:** se todas as sessões usam a mesma conta `gh`, o autor no GitHub é sempre o mesmo — a assinatura é a **única** coisa que diz quem falou.
 
@@ -123,8 +133,9 @@ O handoff é **unidirecional**: o especialista responde **no ticket**, não de v
 Guarde no **projeto do BUS**, não no scratchpad da sessão: `<base>/<PROJECT>/.git-watch-<owner>-<repo>.json`. Assim o histórico **sobrevive ao `/clear`**, ao restart e à troca de sessão — qualquer sessão daquele projeto retoma de onde parou.
 
 ```json
-{ "repo": "owner/repo", "last_checked": "<ISO>", "issues_checkpoint": "1:CLOSED 2:OPEN",
-  "last_comment_id": 123456, "events": [ { "timestamp": "<ISO>", "type": "issue_opened|comment|issue_closed", "issue": 2, "actor": "<login>" } ] }
+{ "repo": "owner/repo", "rules_file": "<caminho do doc de regras deste projeto>",
+  "last_checked": "<ISO>", "issues_checkpoint": "1:CLOSED 2:OPEN", "last_comment_id": 123456,
+  "events": [ { "timestamp": "<ISO>", "type": "issue_opened|comment|issue_closed", "issue": 2, "actor": "<login>" } ] }
 ```
 
 **Antes de rearmar, reconcilie:** compare o `snap()` atual com o checkpoint salvo. Divergiu? Há eventos que chegaram **enquanto você processava** — trate-os *antes* de rearmar e só então atualize o checkpoint. É isso que fecha a janela cega entre o disparo e o rearme.

@@ -30,6 +30,12 @@ O monitor **morre ao detectar** — de propósito, é assim que ele acorda a ses
 
 Daí a reconciliação obrigatória: comparar o `snap()` atual com o checkpoint salvo **antes** de rearmar, e processar o que apareceu. Sem isso o sistema perde eventos de forma silenciosa — o pior modo de falha, porque parece que está funcionando.
 
+## Por que "não presuma o gate do projeto"
+
+O especialista **obedece** ao que vem no handoff — ele não confere se aquele documento é mesmo o do projeto dele. Então apontar pro arquivo errado não gera erro visível: gera trabalho feito sob a **política de outro time**, e isso só aparece na revisão (ou em produção). É por isso que a regra é *localizar antes do primeiro handoff*, e não *deduzir na hora*.
+
+E quando não existe documento nenhum, a saída certa é **perguntar**, não improvisar: um critério de qualidade inventado pelo carteiro vira regra de fato assim que entra num handoff — o especialista não tem como saber que você a criou. Guardar o caminho no `rules_file` do estado evita reprocurar e evita errar depois, quando o watcher cuidar de mais de um repo.
+
 ## Custo: a bolinha de "trabalhando"
 
 O monitor é **task de fundo rastreada**, e é isso que permite acordar a sessão ao terminar. O efeito colateral é que o app mostra a sessão como **ocupada** o tempo todo (bolinha piscando).
