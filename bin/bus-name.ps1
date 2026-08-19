@@ -107,9 +107,10 @@ if ($Set -ne '') {
   # ate o lease de 1h. Como o registro do slug e EXCLUSIVO (a eviccao acima acabou de garantir
   # isso), um lock em nome deste slug so pode ser de uma encarnacao anterior -> libero aqui, no
   # re-arme, que e exatamente quando a sessao se re-apresenta ao BUS.
+  # Varre TODOS os slots (.bus-lock, .bus-lock-2, .bus-lock-3): o orfao pode estar em qualquer um.
   $projRootL = if ($proj -eq 'default') { $BusRoot } else { Join-Path $BusRoot $proj }
-  $lockL = Join-Path $projRootL '.bus-lock'
-  if (Test-Path -LiteralPath $lockL) {
+  foreach ($lockL in @((Join-Path $projRootL '.bus-lock'), (Join-Path $projRootL '.bus-lock-2'), (Join-Path $projRootL '.bus-lock-3'))) {
+    if (-not (Test-Path -LiteralPath $lockL)) { continue }
     try {
       $LL = (Get-Content -LiteralPath $lockL -Raw) | ConvertFrom-Json
       if ([string]$LL.slug -eq $slug -and [string]$LL.sid -ne $sid) {

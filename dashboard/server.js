@@ -358,15 +358,42 @@ function attachToCron(handoffs, specs, projRoot) {
 
 // Lock POR PROJETO (<projeto>/.bus-lock): quem esta "trabalhando agora" naquele projeto.
 // Projetos diferentes tem locks independentes (rodam em paralelo). null se livre/expirado.
+// Capacidade de slots do projeto (<projeto>/.bus-slots, 1..3; default 1 = classico).
+function readSlots(root) {
+  const raw = safeReadText(path.join(root || BUS_ROOT, '.bus-slots'));
+  const n = parseInt(String(raw || '').trim(), 10);
+  return (n >= 1 && n <= 3) ? n : 1;
+}
+
+// Slot 1 mantem o nome '.bus-lock' -- gate antigo so conhece esse arquivo, entao ele disputa o
+// slot 1 e ignora os demais: a frota migra em lote sem corromper nada.
+function slotFile(root, i) {
+  return path.join(root || BUS_ROOT, i === 1 ? '.bus-lock' : '.bus-lock-' + i);
+}
+
+// TODOS os holders vivos, um por slot ocupado (lock expirado nao conta -- o lease ja o liberou).
+// Le SEMPRE os 3 arquivos, nao so ate a capacidade: baixar a capacidade nao expulsa quem esta
+// trabalhando (e drenagem), entao o holder do slot 3 tem que continuar aparecendo ate soltar.
+function readLockHolders(root) {
+  const out = [];
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (let i = 1; i <= 3; i++) {
+    try {
+      const raw = safeReadText(slotFile(root, i));
+      if (!raw) continue;
+      const L = JSON.parse(raw);
+      const expSec = Math.floor(new Date(L.expiry).getTime() / 1000);
+      if (!(nowSec < expSec)) continue;   // expirado => ninguem
+      out.push({ slot: i, slug: L.slug || '?', project: L.project || 'default', since: L.since || null, expiry: L.expiry || null });
+    } catch (_) { /* lock corrompido: trata como livre */ }
+  }
+  return out;
+}
+
+// Compat: quem so quer "tem alguem trabalhando?" continua chamando isto (primeiro holder).
 function readLockHolder(root) {
-  try {
-    const raw = safeReadText(path.join(root || BUS_ROOT, '.bus-lock'));
-    if (!raw) return null;
-    const L = JSON.parse(raw);
-    const expSec = Math.floor(new Date(L.expiry).getTime() / 1000);
-    if (!(Math.floor(Date.now() / 1000) < expSec)) return null;   // expirado => ninguem
-    return { slug: L.slug || '?', project: L.project || 'default', since: L.since || null, expiry: L.expiry || null };
-  } catch (_) { return null; }
+  const h = readLockHolders(root);
+  return h.length ? h[0] : null;
 }
 
 // PAUSA por projeto: presenca do marcador <projeto>/.bus-paused. Enquanto pausado, o gate
@@ -435,8 +462,10 @@ function readCronInterval() {
 // holder do lock daquele projeto = trabalhando AGORA -> status verde (sobrepoe o seen "velho"
 // de um turno longo; trabalhando e o oposto de offline). Roda ANTES do attachToCron pra o
 // destino working nao virar "offline" (X vermelho) num card do inbox.
-function markWorking(specs, holder) {
-  if (holder && holder.slug) for (const s of (specs || [])) if (s.slug === holder.slug) s.status = 'green';
+function markWorking(specs, holders) {
+  // Aceita 1 holder ou a lista de slots -- com N slots ha mais de um "trabalhando agora".
+  const list = Array.isArray(holders) ? holders : (holders ? [holders] : []);
+  for (const h of list) for (const s of (specs || [])) if (s.slug === h.slug) s.status = 'green';
 }
 function buildPayload(p) {
   p = p || 'all';
@@ -446,17 +475,20 @@ function buildPayload(p) {
     const now = Math.floor(Date.now() / 1000);
     const projects = listProjects().map(name => {
       const st = buildState(projectRoot(name));
-      const holder = readLockHolder(projectRoot(name));
-      markWorking(roster[name] || [], holder);
+      const slotHolders = readLockHolders(projectRoot(name));
+      const holder = slotHolders.length ? slotHolders[0] : null;   // compat com o front antigo
+      markWorking(roster[name] || [], slotHolders);
       attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
-      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder, paused: readPaused(projectRoot(name)) };
+      return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder, slotHolders, slots: readSlots(projectRoot(name)), paused: readPaused(projectRoot(name)) };
     });
-    return { now, all: true, projects, holders: projects.map(pr => pr.holder).filter(Boolean), cronInterval };
+    return { now, all: true, projects, holders: projects.flatMap(pr => pr.slotHolders || []), cronInterval };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
-  st.holder = readLockHolder(projectRoot(p));
-  markWorking(roster[p] || [], st.holder);
+  st.slotHolders = readLockHolders(projectRoot(p));
+  st.holder = st.slotHolders.length ? st.slotHolders[0] : null;   // compat
+  st.slots = readSlots(projectRoot(p));
+  markWorking(roster[p] || [], st.slotHolders);
   st.specialists = roster[p] || [];
   attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
   st.paused = readPaused(projectRoot(p));
@@ -613,6 +645,35 @@ const server = http.createServer((req, res) => {
           try { fs.unlinkSync(marker); } catch (_) {}
         }
         sendJson(res, { project: proj, paused: !!d.paused });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
+    return;
+  }
+
+  // CAPACIDADE DE SLOTS do projeto (1..3). So escreve <projeto>/.bus-slots -- nao toca em lock
+  // nenhum: BAIXAR a capacidade NAO expulsa quem esta trabalhando. A capacidade so e consultada
+  // na hora de ADQUIRIR, entao o slot excedente simplesmente nao e re-adquirido depois que o
+  // holder solta. Isso e drenagem, e e o comportamento que o operador espera do botao.
+  if (req.method === 'POST' && urlPath === '/api/slots') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const d = JSON.parse(body || '{}');
+        const proj = d.project;
+        const n = parseInt(d.slots, 10);
+        if (!proj || proj === 'all' || !/^[a-zA-Z0-9_-]+$/.test(proj) || !(n >= 1 && n <= 3)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'valid project and slots (1-3) required' }));
+          return;
+        }
+        const root = projectRoot(proj);
+        try { fs.mkdirSync(root, { recursive: true }); } catch (_) {}
+        fs.writeFileSync(path.join(root, '.bus-slots'), String(n));
+        sendJson(res, { project: proj, slots: n });
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String(e) }));

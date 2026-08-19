@@ -159,18 +159,36 @@ main() {
     bus_block
   fi
 
-  # 3. lock POR PROJETO (<projeto>/.bus-lock): tomado por OUTRA sessao do MESMO projeto e fresco -> defer
-  lock="$projroot/.bus-lock"
-  if [ -f "$lock" ]; then
-    lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
-    lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
-    lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock")"
-    # SID TROCOU (auto-cura do /clear): lock em nome do MEU slug com sid diferente = encarnacao
-    # anterior desta mesma sessao (o slug e exclusivo). Nao defiro; roubo no acquire. Ver .ps1.
-    if [ -n "$lexp" ] && [ "$now" -lt "$lexp" ] && [ "$lsid" != "$sid" ] && [ "$lslug" != "$slug" ]; then
-      buslog "$base" "$sid" "$slug" "defer-lock>$lsid"
-      bus_block
+  # 3. SLOTS DE LOCK POR PROJETO. Capacidade em <projeto>/.bus-slots (1..3, default 1 =
+  # comportamento classico). O slot 1 mantem o nome '.bus-lock' DE PROPOSITO: gate antigo so
+  # conhece esse arquivo, disputa o slot 1 e ignora os outros -- migracao em lote sem corromper.
+  slot_cap=1
+  sv="$(cat "$projroot/.bus-slots" 2>/dev/null | tr -dc '0-9')"
+  [ -n "$sv" ] && [ "$sv" -ge 1 ] 2>/dev/null && [ "$sv" -le 3 ] 2>/dev/null && slot_cap="$sv"
+  slot_files=""
+  i=1
+  while [ "$i" -le "$slot_cap" ]; do
+    if [ "$i" = "1" ]; then slot_files="$projroot/.bus-lock"; else slot_files="$slot_files $projroot/.bus-lock-$i"; fi
+    i=$((i+1))
+  done
+  # LIVRE = nao existe, expirou, e meu sid, ou traz o MEU slug com sid velho (auto-cura do
+  # /clear: o slug e exclusivo, entao aquele lock so pode ser encarnacao anterior de mim).
+  free_slots=0; holder_slug=""; sid_trocado=0
+  for lk in $slot_files; do
+    if [ ! -f "$lk" ]; then free_slots=$((free_slots+1)); continue; fi
+    lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lk")"
+    lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lk")"
+    lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lk")"
+    if [ -z "$lexp" ] || [ "$now" -ge "$lexp" ] || [ "$lsid" = "$sid" ] || [ "$lslug" = "$slug" ]; then
+      free_slots=$((free_slots+1))
+      [ "$lslug" = "$slug" ] && [ "$lsid" != "$sid" ] && sid_trocado=1
+    elif [ -z "$holder_slug" ]; then holder_slug="$lslug"
     fi
+  done
+  [ "$sid_trocado" = "1" ] && buslog "$base" "$sid" "$slug" "lock-sid-trocado"
+  if [ "$free_slots" -eq 0 ]; then
+    buslog "$base" "$sid" "$slug" "defer-lock>$holder_slug"
+    bus_block
   fi
 
   # 4. PRIORIDADES do projeto: arquivo <projroot>/.priority, linhas "slug:N" (default 1000;
@@ -212,7 +230,10 @@ main() {
 
   # 4b. PRIORIDADE: cedo a vez (defiro) se EU tenho trabalho e existe handoff p/ alguem de
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
-  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ]; then
+  # Com MAIS DE UM slot livre, ceder a vez seria ficar ocioso COM VAGA NA MESA -- o oposto do
+  # motivo de abrir slots. A cessao entrega um recurso ESCASSO: so vale se, depois de eu pegar
+  # o meu, nao sobraria slot pro de prioridade maior. Capacidade 1 -> free_slots=1 = regra classica.
+  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ] && [ "$free_slots" -le 1 ]; then
     buslog "$base" "$sid" "$slug" "defer-prio>$higherslug"
     bus_block
   fi
@@ -222,22 +243,25 @@ main() {
     iso_now="$(date -d "@$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$now")"
     iso_exp="$(date -d "@$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$exp")"
     obj="{\"sid\":\"$sid\",\"slug\":\"$slug\",\"project\":\"$project\",\"since\":\"$iso_now\",\"expiry\":\"$iso_exp\",\"exp_epoch\":$exp}"
-    # acquire ATOMICO: noclobber faz '>' usar O_EXCL (cria so se nao existir, sem TOCTOU);
-    # par do CreateNew/FileShare.None do .ps1.
-    if ( set -o noclobber; printf '%s' "$obj" > "$lock" ) 2>/dev/null; then
-      buslog "$base" "$sid" "$slug" acquire
-      exit 0
-    fi
-    # ja existe: rouba se for MEU sid, se EXPIROU, ou se for o MEU SLUG com sid velho (sessao
-    # anterior morta por /clear -- o slug e exclusivo, entao aquele lock so pode ser meu).
-    lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
-    lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
-    lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock")"
-    if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; } || [ "$lslug" = "$slug" ]; then
-      how=acquire-steal
-      [ "$lslug" = "$slug" ] && [ "$lsid" != "$sid" ] && how=acquire-sid-trocado
-      printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" "$how"; exit 0
-    fi
+    # Percorre os slots ate conseguir um. acquire ATOMICO: noclobber faz '>' usar O_EXCL (cria so
+    # se nao existir, sem TOCTOU) -- par do CreateNew/FileShare.None do .ps1, e e o que torna N
+    # slots seguro sem nenhum outro mecanismo.
+    for lock in $slot_files; do
+      if ( set -o noclobber; printf '%s' "$obj" > "$lock" ) 2>/dev/null; then
+        buslog "$base" "$sid" "$slug" acquire
+        exit 0
+      fi
+      # ja existe: rouba se for MEU sid, se EXPIROU, ou se for o MEU SLUG com sid velho (sessao
+      # anterior morta por /clear -- o slug e exclusivo, entao aquele lock so pode ser meu).
+      lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lock")"
+      lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"
+      lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lock")"
+      if [ "$lsid" = "$sid" ] || { [ -n "$lexp" ] && [ "$now" -ge "$lexp" ]; } || [ "$lslug" = "$slug" ]; then
+        how=acquire-steal
+        [ "$lslug" = "$slug" ] && [ "$lsid" != "$sid" ] && how=acquire-sid-trocado
+        printf '%s' "$obj" > "$lock"; buslog "$base" "$sid" "$slug" "$how"; exit 0
+      fi
+    done
     buslog "$base" "$sid" "$slug" defer-race
     bus_block
   fi

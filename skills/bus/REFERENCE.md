@@ -60,6 +60,31 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## Slots de lock: de 1 para até 3 (v0.9.9)
+
+O lock era 1 por projeto — **1 especialista trabalhando por vez**. Agora a capacidade é configurável (1..3) em `<projeto>/.bus-slots`, pelo stepper `slots:` do dashboard.
+
+**Por que foi barato:** o acquire já era **atômico** (`File.Open(..., CreateNew, ..., FileShare.None)` no `.ps1`, `set -o noclobber` + `>` no `.sh` — ambos O_EXCL). Test-and-set atômico é a parte difícil de qualquer esquema de N slots; ela já estava paga. O resto é um laço nos slots e um arquivo de capacidade.
+
+**Slot 1 continua chamando `.bus-lock`** (2 e 3 são `.bus-lock-2`/`.bus-lock-3`). Não é estética: um gate **antigo** só conhece esse nome, então disputa o slot 1 e ignora os outros — a frota migra em lote sem corromper nada e sem janela quebrada.
+
+**Baixar a capacidade não expulsa ninguém.** Ela só é lida na hora de *adquirir*, então o slot excedente simplesmente não é reocupado quando o holder solta. É drenagem — e sai de graça do desenho, não precisou de código.
+
+**A consequência que quase passou batido: a cessão por prioridade fica errada com N>1.** O gate cede a vez (`defer-prio`) quando alguém de prioridade maior tem pendente. Isso faz sentido com **um** slot: você abre mão da única vaga. Com 3, você ficaria ocioso **com vaga livre na mesa** — o oposto do motivo de abrir slots. A regra virou: só cede se, depois de eu pegar o meu, **não sobraria slot** pro de prioridade maior (`freeSlots <= 1`). Com capacidade 1 isso é exatamente a regra clássica, então nada mudou pra quem não usa slots. Medido nos dois shells:
+
+```
+cap 1 -> defer-prio>dev-b     (cede)
+cap 3 -> acquire              (não cede: há vaga pros dois)
+```
+
+**Release e auto-cura passaram a varrer os 3 slots.** `bus-lock -Release` procura o slot com o **meu sid** (antes olhava só o `.bus-lock`); o `bus-name` faz o mesmo procurando o **meu slug** com sid velho (auto-cura do `/clear`). Sem isso, quem estivesse no slot 2 ou 3 nunca liberaria — e o slot ficaria preso até o lease de 1h.
+
+**O caminho fail-open do gate continua usando só o slot 1**, de propósito: sob erro inesperado, ser mais conservador (menos concorrência) é o comportamento certo.
+
+**O risco não é o código, é operacional** — e por isso o default é 1 e a capacidade é **por projeto**:
+- o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
+- **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
+
 ## Agente long-lived: o que sobrevive à compactação (v0.9.8)
 
 Especialista do BUS vive dias. A conversa **não** — compactação e `/clear` apagam. Três camadas, e o que decide qual usar é **o que sobrevive a quê**:

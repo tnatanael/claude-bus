@@ -24,7 +24,16 @@ if [ -z "$project" ] && [ -n "$sid" ]; then
   fi
 fi
 if [ -n "$project" ] && [ "$project" != "default" ]; then projRoot="$base/$project"; else projRoot="$base"; fi
+# SLOTS: o projeto pode ter ate 3 (.bus-lock, .bus-lock-2, .bus-lock-3) -- eu posso estar em
+# qualquer um. Procuro o que tem o MEU sid; nao achando, fico com o slot 1.
 lock="$projRoot/.bus-lock"
+if [ -n "$sid" ]; then
+  for cand in "$projRoot/.bus-lock" "$projRoot/.bus-lock-2" "$projRoot/.bus-lock-3"; do
+    [ -f "$cand" ] || continue
+    csid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$cand")"
+    if [ "$csid" = "$sid" ]; then lock="$cand"; break; fi
+  done
+fi
 if [ "$release" = "1" ]; then
   if [ -f "$lock" ] && [ -n "$sid" ]; then
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lock")"

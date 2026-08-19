@@ -43,7 +43,7 @@ Slug/projeto minúsculos, sem espaço.
 
 ## 2. Fluxo do `/bus`
 
-> Um hook já te filtrou **antes** de você acordar: você só chega aqui com trabalho seu (inbox **ou** preso em `processing`), pós-restart, ou `/bus` manual. Chegou com trabalho → **o lock do projeto já é seu**; libere no fim.
+> Um hook já te filtrou **antes** de você acordar: você só chega aqui com trabalho seu (inbox **ou** preso em `processing`), pós-restart, ou `/bus` manual. Chegou com trabalho → **um slot de lock do projeto já é seu**; libere no fim. (O projeto tem 1–3 slots, configurável no dashboard; com mais de 1, outro especialista pode estar trabalhando ao mesmo tempo que você — **não presuma exclusividade sobre arquivos do repo**.)
 
 1. **Cron — desarma no início, re-arma no fim.** `CronList`/`CronCreate`/`CronDelete` são deferidas: rode `ToolSearch select:CronList,CronCreate,CronDelete` antes. **Não confie no `CronList`** (pós-restart lista *phantom* morto).
    - **DESARMAR** = `CronList` → `CronDelete` em **CADA** job cujo prompt começa com `/bus` **ou** `bus-tick` (fica ZERO).

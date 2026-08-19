@@ -237,27 +237,43 @@ try {
     BusBlock $null
   }
 
-  # 4. Lock POR PROJETO (<projeto>/.bus-lock): serializa DENTRO do projeto; projetos
-  # diferentes rodam em PARALELO. Tomado por OUTRA sessao do MESMO projeto e fresco -> defer.
-  $lockFile = Join-Path $projRoot '.bus-lock'
+  # 4. SLOTS DE LOCK POR PROJETO: serializa DENTRO do projeto; projetos diferentes rodam em
+  # PARALELO. Capacidade em <projeto>/.bus-slots (1..3, default 1 = comportamento classico).
+  # O slot 1 mantem o nome '.bus-lock' DE PROPOSITO: gate antigo so conhece esse arquivo, entao
+  # ele disputa o slot 1 e ignora os outros -- a frota migra em lote sem corromper nada.
   $now = [datetimeoffset]::Now
-  if (Test-Path -LiteralPath $lockFile) {
+  $slotCap = 1
+  try {
+    $sv = 0
+    if ([int]::TryParse((Get-Content -LiteralPath (Join-Path $projRoot '.bus-slots') -Raw -ErrorAction Stop).Trim(), [ref]$sv) -and $sv -ge 1 -and $sv -le 3) { $slotCap = $sv }
+  } catch {}
+  $slotFiles = @()
+  for ($i = 1; $i -le $slotCap; $i++) {
+    $slotFiles += (Join-Path $projRoot $(if ($i -eq 1) { '.bus-lock' } else { '.bus-lock-' + $i }))
+  }
+  # Um slot esta LIVRE se nao existe, esta expirado, e meu sid, ou traz o MEU slug com sid velho.
+  # SID TROCOU (auto-cura): app trava, operador da /clear, a sessao ganha sid NOVO e o lock ficou
+  # com o antigo. So por sid, a sessao nova nao reconhece o proprio lock, nao libera, e o slot
+  # fica preso ate o lease de 1h. O registro do slug e EXCLUSIVO (bus-name -Set evicta os outros
+  # sids do mesmo projeto+slug), entao lock em nome do MEU slug so pode ser encarnacao anterior
+  # de MIM -> nao defiro; sigo e roubo no acquire.
+  $freeSlots = 0; $holderSlug = ''; $sidTrocado = $false
+  foreach ($lf in $slotFiles) {
+    if (-not (Test-Path -LiteralPath $lf)) { $freeSlots++; continue }
     try {
-      $L = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
+      $L = (Get-Content -LiteralPath $lf -Raw) | ConvertFrom-Json
       $exp = [datetimeoffset]::Parse($L.expiry)
-      # SID TROCOU (auto-cura): quando o app trava e o operador faz /clear, a sessao ganha um
-      # sid NOVO -- mas o lock ficou gravado com o sid ANTIGO. Comparando so por sid, a sessao
-      # nova nao reconhece o proprio lock, nao consegue liberar, e o PROJETO INTEIRO fica preso
-      # ate o lease de 1h. Como o registro do slug e EXCLUSIVO (o bus-name -Set evicta os outros
-      # sids do mesmo projeto+slug), um lock em nome do MEU slug so pode ser de uma encarnacao
-      # anterior de MIM -> nao defiro; sigo e roubo no acquire (passo 5b).
       $meuSlugSidVelho = ([string]$L.slug -eq $slug -and $L.sid -ne $sid)
-      if ($now -lt $exp -and $L.sid -ne $sid -and -not $meuSlugSidVelho) {
-        BusLog $base $sid $slug ("defer-lock>" + ([string]$L.slug))   # SILENCIOSO
-        BusBlock $null
-      }
-      if ($meuSlugSidVelho) { BusLog $base $sid $slug 'lock-sid-trocado' }
-    } catch {}   # lock corrompido/ilegivel -> trata como livre
+      if ($now -ge $exp -or $L.sid -eq $sid -or $meuSlugSidVelho) {
+        $freeSlots++
+        if ($meuSlugSidVelho) { $sidTrocado = $true }
+      } elseif (-not $holderSlug) { $holderSlug = [string]$L.slug }
+    } catch { $freeSlots++ }   # lock corrompido/ilegivel -> trata como livre
+  }
+  if ($sidTrocado) { BusLog $base $sid $slug 'lock-sid-trocado' }
+  if ($freeSlots -eq 0) {
+    BusLog $base $sid $slug ("defer-lock>" + $holderSlug)   # SILENCIOSO
+    BusBlock $null
   }
 
   # 5. PRIORIDADES do projeto: arquivo <projroot>/.priority, linhas "slug:N" (default 1000;
@@ -313,7 +329,11 @@ try {
   # CEDO a vez (defiro). Igual ou menor nao bloqueia. So vale quando EU tenho trabalho --
   # senao a logica normal de re-arme/empty segue valendo. (PO/coordenador: prioridade baixa
   # -> processa por ultimo.)
-  if ($myPending -and $higherPending) {
+  # Com MAIS DE UM slot livre, ceder a vez seria ficar ocioso COM VAGA NA MESA -- o oposto do
+  # motivo de abrir slots. A cessao existe pra entregar um recurso ESCASSO: so vale quando,
+  # depois de eu pegar o meu, nao sobraria slot pro de prioridade maior. Com capacidade 1
+  # ($freeSlots = 1 aqui) a regra e exatamente a classica.
+  if ($myPending -and $higherPending -and $freeSlots -le 1) {
     BusLog $base $sid $slug ("defer-prio>" + $higherSlug)   # SILENCIOSO
     BusBlock $null
   }
@@ -323,20 +343,26 @@ try {
     $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
     $enc = New-Object System.Text.UTF8Encoding($false)
     $acquired = $false; $how = 'acquire'
-    try {
-      $fs = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-      $b = [System.Text.Encoding]::UTF8.GetBytes($obj); $fs.Write($b,0,$b.Length); $fs.Close(); $acquired = $true
-    } catch {
+    # Percorre os slots ate conseguir um. CreateNew e test-and-set ATOMICO: dois especialistas
+    # no mesmo instante, um cria e o outro cai no catch -- e o que torna N slots seguro sem
+    # nenhum outro mecanismo. Roubar (expirado/meu sid/meu slug) so acontece no catch.
+    foreach ($lockFile in $slotFiles) {
       try {
-        $L2 = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
-        $exp2 = [datetimeoffset]::Parse($L2.expiry)
-        # rouba se: e MEU sid, ja EXPIROU, ou e o MEU SLUG com sid velho (sessao anterior que
-        # o /clear matou -- o slug e exclusivo, entao aquele lock so pode ser meu). Ver passo 4.
-        if ($L2.sid -eq $sid -or $now -ge $exp2 -or [string]$L2.slug -eq $slug) {
-          [System.IO.File]::WriteAllText($lockFile, $obj, $enc); $acquired = $true
-          $how = if ([string]$L2.slug -eq $slug -and $L2.sid -ne $sid) { 'acquire-sid-trocado' } else { 'acquire-steal' }
-        }
-      } catch {}
+        $fs = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $b = [System.Text.Encoding]::UTF8.GetBytes($obj); $fs.Write($b,0,$b.Length); $fs.Close(); $acquired = $true
+      } catch {
+        try {
+          $L2 = (Get-Content -LiteralPath $lockFile -Raw) | ConvertFrom-Json
+          $exp2 = [datetimeoffset]::Parse($L2.expiry)
+          # rouba se: e MEU sid, ja EXPIROU, ou e o MEU SLUG com sid velho (sessao anterior que
+          # o /clear matou -- o slug e exclusivo, entao aquele lock so pode ser meu). Ver passo 4.
+          if ($L2.sid -eq $sid -or $now -ge $exp2 -or [string]$L2.slug -eq $slug) {
+            [System.IO.File]::WriteAllText($lockFile, $obj, $enc); $acquired = $true
+            $how = if ([string]$L2.slug -eq $slug -and $L2.sid -ne $sid) { 'acquire-sid-trocado' } else { 'acquire-steal' }
+          }
+        } catch {}
+      }
+      if ($acquired) { break }
     }
     if ($acquired) { BusLog $base $sid $slug $how; exit 0 }
     BusLog $base $sid $slug 'defer-race'   # SILENCIOSO
