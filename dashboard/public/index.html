@@ -295,6 +295,7 @@
   .slot-btn.free { background: rgba(63,185,80,.85); border-color: rgba(63,185,80,.9); }
   .slot-btn.busy { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 6px rgba(210,153,34,.5); }
   .slot-btn.busy.draining { border-style: dashed; border-color: var(--grey); }
+  .lockbar .lk-holder { display: inline-block; white-space: nowrap; }
   .lockbar .lk-sep { opacity: .35; margin: 0 2px; }
   .lockbar .lk-cap { font-family: var(--mono); font-size: 11px; opacity: .7; margin-left: 4px; }
   .handoff .route .fyi { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 6px; margin-left: 3px; align-self: center; color: var(--grey); background: rgba(255,255,255,.03); border: 1px dashed var(--border); }
@@ -374,7 +375,10 @@
   .arm-dot.green { background: var(--green); }
   .arm-dot.yellow { background: var(--amber); }
   .arm-dot.red { background: var(--red); }
-.lockbar { flex: 0 0 auto; width: 210px; margin: 0; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: nowrap; line-height: 1.35; text-align: center; }
+/* Com 1 slot cabia nos 210px fixos; com N holders o texto vazava PRA FORA da caixa (width fixo +
+   nowrap nao corta nem quebra, so transborda). Agora a caixa CRESCE ate um teto e, passando
+   disso, quebra em mais linhas -- nunca invade o resto do cabecalho nem sai da tela. */
+.lockbar { flex: 0 1 auto; min-width: 210px; max-width: min(52vw, 560px); margin: 0; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; text-align: center; }
 .proj-title { color: var(--accent); font-weight: 700; }
 .hammer { display: inline-block; transform-origin: 75% 75%; animation: hammer-tap .55s ease-in-out infinite; }
 @keyframes hammer-tap { 0%,100% { transform: rotate(-20deg); } 55% { transform: rotate(12deg); } }
@@ -760,10 +764,12 @@ function renderHolder(holders, slots) {
   const ocup = cap > 1 ? ' <span class="lk-cap">' + list.length + '/' + cap + '</span>' : '';
   if (list.length) {
     bar.className = "lockbar busy";
+    // Cada holder é um bloco que NÃO quebra por dentro ("dev-frontend · ~55m" fica inteiro);
+    // a quebra só acontece ENTRE holders, quando não cabem na linha.
     bar.innerHTML = '<span class="hammer">🔨</span> ' + list.map(h => {
       const remMin = h.expiry ? Math.max(0, Math.round((new Date(h.expiry).getTime() - Date.now()) / 60000)) : null;
       const lease = (remMin != null) ? ' · <span class="lk-lease">~' + remMin + 'm</span>' : '';
-      return '<span class="lk-slug">' + esc(h.slug) + '</span>' + lease;
+      return '<span class="lk-holder"><span class="lk-slug">' + esc(h.slug) + '</span>' + lease + '</span>';
     }).join(' <span class="lk-sep">|</span> ') + ocup + ' ' + LOCK_TIP;
   } else {
     bar.className = "lockbar free";
