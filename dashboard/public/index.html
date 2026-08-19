@@ -286,6 +286,15 @@
   .handoff .route .prio.high { color: var(--amber); background: rgba(210,153,34,.16); border: 1px solid rgba(210,153,34,.4); }
   .handoff .route .prio.def { color: var(--grey); background: rgba(255,255,255,.04); border: 1px solid var(--border); }
   /* fyi: nao acorda ninguem, entra de carona -- fica discreto, nao compete com o pendente real */
+  /* 3 botoes de slot: cinza = desabilitado, verde = habilitado e livre, ambar = ocupado agora.
+     Ambar vence o cinza: um slot que voce desabilitou mas ainda tem alguem dentro esta DRENANDO
+     -- some quando o especialista soltar, e mentir sobre isso esconderia trabalho em curso. */
+  .slot-btn { width: 15px; height: 15px; padding: 0; margin-left: 3px; border-radius: 4px; cursor: pointer; vertical-align: -2px;
+              border: 1px solid var(--border); background: rgba(255,255,255,.05); }
+  .slot-btn:hover { border-color: var(--accent); }
+  .slot-btn.free { background: rgba(63,185,80,.85); border-color: rgba(63,185,80,.9); }
+  .slot-btn.busy { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 6px rgba(210,153,34,.5); }
+  .slot-btn.busy.draining { border-style: dashed; border-color: var(--grey); }
   .lockbar .lk-sep { opacity: .35; margin: 0 2px; }
   .lockbar .lk-cap { font-family: var(--mono); font-size: 11px; opacity: .7; margin-left: 4px; }
   .handoff .route .fyi { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 6px; margin-left: 3px; align-self: center; color: var(--grey); background: rgba(255,255,255,.03); border: 1px dashed var(--border); }
@@ -418,7 +427,7 @@
   <div class="meta">
     <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
     <span class="cron-cfg" title="Intervalo do auto-recheck (cron */N min, 1–30). Grava no BUS; cada especialista pega no próximo /bus (~1 ciclo, não é instantâneo).">check: <button class="cron-step" id="cronDec" type="button">−</button><b id="cronVal">5</b>m<button class="cron-step" id="cronInc" type="button">+</button></span>
-    <span class="cron-cfg" id="slotCfg" style="display:none" title="Quantos especialistas deste projeto podem trabalhar AO MESMO TEMPO (1–3). Baixar NÃO expulsa ninguém: o slot a mais só deixa de ser reocupado quando quem está nele terminar. Cuidado: com mais de 1, dois especialistas podem mexer no mesmo repo simultaneamente — e cada um é uma sessão consumindo a máquina.">slots: <button class="cron-step" id="slotDec" type="button">−</button><b id="slotVal">1</b><button class="cron-step" id="slotInc" type="button">+</button></span>
+    <span class="cron-cfg" id="slotCfg" style="display:none" title="Quantos especialistas deste projeto trabalham AO MESMO TEMPO. cinza = desabilitado · verde = livre · âmbar = ocupado. Cuidado: com mais de 1, dois especialistas podem mexer no mesmo repo ao mesmo tempo — e cada slot é uma sessão consumindo a máquina.">slots: <span id="slotBtns"></span></span>
     <span>bus root: <b id="busRoot">…</b></span>
     <span>now: <b id="now">…</b></span>
     <span class="src" id="src">…</span>
@@ -1148,14 +1157,34 @@ function bumpCronInterval(delta) {
 document.getElementById("cronDec").addEventListener("click", () => bumpCronInterval(-1));
 document.getElementById("cronInc").addEventListener("click", () => bumpCronInterval(+1));
 
-// SLOTS de lock (1..3) do projeto selecionado. Mesma dança do stepper do cron, pelo mesmo motivo:
-// sem trava de edição + debounce, o poll de 1,5s pega o valor antigo (o POST ainda não gravou) e
-// puxa o display de volta -- o glitch que já corrigimos uma vez aqui.
-let slotCap = 1, slotEditUntil = 0, slotPostTimer = null;
-function applySlots(n) {
-  slotCap = n;
-  const v = document.getElementById("slotVal"); if (v) v.textContent = n;
+// SLOTS de lock: 3 botões, um por slot. cinza = desabilitado · verde = habilitado e livre ·
+// âmbar = ocupado agora. Clicar num CINZA habilita até ali; clicar num habilitado desabilita
+// dele pra cima. Slot 1 não desliga (0 slots seria pausar o projeto -- e pra isso existe o
+// botão Pausar).
+//
+// Os botões gravam o valor ABSOLUTO (capacidade = k), não um incremento. Isso mata por
+// construção a corrida que o stepper do cron precisou de gambiarra pra resolver: com +/-, um
+// valor local defasado COMPÕE (clica em cima do número errado); com valor absoluto, o pior caso
+// é gravar o que o operador viu na tela. A trava de edição fica só pra evitar o pisca do poll.
+let slotCap = 1, slotEditUntil = 0, slotPostTimer = null, slotBusy = [];
+function renderSlotBtns() {
+  const box = document.getElementById("slotBtns");
+  if (!box) return;
+  let html = "";
+  for (let i = 1; i <= 3; i++) {
+    const ocupado = slotBusy.indexOf(i) >= 0;
+    const habilitado = i <= slotCap;
+    const cls = ocupado ? ("slot-btn busy" + (habilitado ? "" : " draining")) : (habilitado ? "slot-btn free" : "slot-btn");
+    const tip = ocupado
+      ? (habilitado ? "slot " + i + ": OCUPADO agora (veja quem, ao lado). Clique pra desabilitar — não expulsa ninguém, só para de ser reocupado quando ele terminar."
+                    : "slot " + i + ": DRENANDO — desabilitado, mas ainda tem alguém trabalhando nele. Some sozinho quando soltar.")
+      : (habilitado ? "slot " + i + ": livre. Clique pra desabilitar deste pra cima."
+                    : "slot " + i + ": desabilitado. Clique pra habilitar até aqui — mais um especialista poderá trabalhar em paralelo neste projeto.");
+    html += '<button type="button" class="' + cls + '" data-slot="' + i + '" title="' + esc(tip) + '"></button>';
+  }
+  box.innerHTML = html;
 }
+function applySlots(n) { slotCap = n; renderSlotBtns(); }
 function syncSlots(state) {
   const cfg = document.getElementById("slotCfg");
   if (!cfg) return;
@@ -1163,27 +1192,33 @@ function syncSlots(state) {
   if (!state || state.all || !state.project) { cfg.style.display = "none"; return; }
   cfg.style.display = "";
   cfg.dataset.project = state.project;
+  slotBusy = (state.slotHolders || []).map(h => h.slot);
   const n = state.slots;
-  if (typeof n !== "number" || n < 1 || n > 3) return;
-  if (Date.now() < slotEditUntil) return;   // editando/gravando: mantém o valor local
-  applySlots(n);
+  if (typeof n === "number" && n >= 1 && n <= 3 && Date.now() >= slotEditUntil) slotCap = n;
+  renderSlotBtns();
 }
-function bumpSlots(delta) {
+function setSlots(k) {
   const cfg = document.getElementById("slotCfg");
   const proj = cfg && cfg.dataset.project;
   if (!proj || proj === "all") return;
-  const n = Math.max(1, Math.min(3, slotCap + delta));
+  const n = Math.max(1, Math.min(3, k));
+  if (n === slotCap) return;
   applySlots(n);
-  slotEditUntil = Date.now() + 1500;
+  slotEditUntil = Date.now() + 1500;         // segura o poll enquanto o POST não assenta
   clearTimeout(slotPostTimer);
   slotPostTimer = setTimeout(async () => {
     try { await fetch("/api/slots", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: proj, slots: slotCap }) }); } catch (_) {}
     slotEditUntil = Date.now() + 800;
     tick();
-  }, 450);
+  }, 300);
 }
-document.getElementById("slotDec").addEventListener("click", () => bumpSlots(-1));
-document.getElementById("slotInc").addEventListener("click", () => bumpSlots(+1));
+// Delegação: os botões são redesenhados a cada poll, então o listener vai no container.
+document.getElementById("slotBtns").addEventListener("click", (e) => {
+  const b = e.target.closest(".slot-btn");
+  if (!b) return;
+  const i = parseInt(b.dataset.slot, 10);
+  setSlots(i <= slotCap ? i - 1 : i);   // habilitado -> desabilita dele pra cima; cinza -> habilita até ele
+});
 // Botao Pausar/Retomar -> liga/desliga a pausa do projeto selecionado (POST /api/pause).
 document.getElementById("pauseBtn").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
