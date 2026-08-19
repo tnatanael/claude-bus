@@ -70,12 +70,26 @@ O lock era 1 por projeto — **1 especialista trabalhando por vez**. Agora a cap
 
 **Baixar a capacidade não expulsa ninguém.** Ela só é lida na hora de *adquirir*, então o slot excedente simplesmente não é reocupado quando o holder solta. É drenagem — e sai de graça do desenho, não precisou de código.
 
-**A consequência que quase passou batido: a cessão por prioridade fica errada com N>1.** O gate cede a vez (`defer-prio`) quando alguém de prioridade maior tem pendente. Isso faz sentido com **um** slot: você abre mão da única vaga. Com 3, você ficaria ocioso **com vaga livre na mesa** — o oposto do motivo de abrir slots. A regra virou: só cede se, depois de eu pegar o meu, **não sobraria slot** pro de prioridade maior (`freeSlots <= 1`). Com capacidade 1 isso é exatamente a regra clássica, então nada mudou pra quem não usa slots. Medido nos dois shells:
+**A consequência que quase passou batido: a cessão por prioridade fica errada com N>1.** O gate cede a vez (`defer-prio`) quando alguém de prioridade maior tem pendente. Isso faz sentido com **um** slot: você abre mão da única vaga. Com 3, ceder seria ficar ocioso com vaga na mesa.
+
+A **primeira** correção foi `freeSlots <= 1` ("sobrou mais de uma vaga? não cedo") e ela estava **errada** — presume que a vaga fica **reservada** até o de prioridade maior acordar. Não fica: cada sessão tica no seu minuto e **quem chega primeiro leva**. Medido em produção (rh-proxima, 3 slots), o operador viu antes de mim:
 
 ```
-cap 1 -> defer-prio>dev-b     (cede)
-cap 3 -> acquire              (não cede: há vaga pros dois)
+01:14:07  acquire  process-reviewer   (prio 10 — deveria ceder)
+01:14:18  acquire  dev-backend        (pegou a "vaga sobrando" 11s depois)
+01:14:30  defer    dev-frontend       (prio 1000 — era quem tinha a vez)
+01:16:31  acquire  dev-frontend       (2 minutos atrasado)
 ```
+
+A regra correta **reserva**: cedo se as vagas livres **não cobrem** todos os slugs distintos de prioridade maior com pendência — `freeSlots <= higherSlugs.Count`. Verificado nos dois shells, com 2 de prioridade maior pendentes:
+
+| capacidade | vagas livres | decisão |
+|---|---|---|
+| 1 | 1 | cede (regra clássica intacta) |
+| 2 | 2 | cede — as 2 vagas são deles |
+| 3 | 3 | passa — pega a 3ª e deixa 2 |
+
+Lição geral: **num sistema de tique, "há recurso livre agora" não é "haverá recurso quando o outro acordar".** Reservar é a única forma de a ordem configurada sobreviver à corrida entre tiques. (Ceder sempre pode fazer o de número baixo esperar muito quando os de cima nunca esvaziam — isso é inerente ao "cede a vez", não efeito dos slots.)
 
 **Release e auto-cura passaram a varrer os 3 slots.** `bus-lock -Release` procura o slot com o **meu sid** (antes olhava só o `.bus-lock`); o `bus-name` faz o mesmo procurando o **meu slug** com sid velho (auto-cura do `/clear`). Sem isso, quem estivesse no slot 2 ou 3 nunca liberaria — e o slot ficaria preso até o lease de 1h.
 

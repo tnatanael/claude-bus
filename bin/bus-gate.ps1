@@ -291,7 +291,7 @@ try {
   $myPrio = if ($prio.ContainsKey($slug)) { $prio[$slug] } else { 1000 }
 
   $inbox = Join-Path $projRoot 'inbox'
-  $myPending = $false; $higherPending = $false; $higherSlug = ''
+  $myPending = $false; $higherPending = $false; $higherSlug = ''; $higherSlugs = @{}
   # TRABALHO PRESO EM processing/ TAMBEM E TRABALHO. Handoff que EU reivindiquei e nunca fechei
   # (turno morto, /clear, app fechado) nao esta mais no inbox -- entao, sem isto, o gate via
   # "inbox vazia", bloqueava o tique, e a sessao NUNCA se recuperava sozinha: ficava presa com
@@ -320,7 +320,9 @@ try {
       if ($toSlug -eq $slug) { $myPending = $true }
       elseif ($toSlug -ne '') {
         $xPrio = if ($prio.ContainsKey($toSlug)) { $prio[$toSlug] } else { 1000 }
-        if ($xPrio -gt $myPrio) { $higherPending = $true; if (-not $higherSlug) { $higherSlug = $toSlug } }
+        # Conta os DISTINTOS de prioridade maior com pendencia -- e quantas vagas precisam
+        # sobrar pra eles (ver 5b). Varios handoffs pro mesmo slug continuam sendo 1 vaga.
+        if ($xPrio -gt $myPrio) { $higherPending = $true; $higherSlugs[$toSlug] = $true; if (-not $higherSlug) { $higherSlug = $toSlug } }
       }
     }
   }
@@ -329,11 +331,20 @@ try {
   # CEDO a vez (defiro). Igual ou menor nao bloqueia. So vale quando EU tenho trabalho --
   # senao a logica normal de re-arme/empty segue valendo. (PO/coordenador: prioridade baixa
   # -> processa por ultimo.)
-  # Com MAIS DE UM slot livre, ceder a vez seria ficar ocioso COM VAGA NA MESA -- o oposto do
-  # motivo de abrir slots. A cessao existe pra entregar um recurso ESCASSO: so vale quando,
-  # depois de eu pegar o meu, nao sobraria slot pro de prioridade maior. Com capacidade 1
-  # ($freeSlots = 1 aqui) a regra e exatamente a classica.
-  if ($myPending -and $higherPending -and $freeSlots -le 1) {
+  # CEDO A VEZ se as vagas livres NAO COBREM todos os de prioridade maior que tem pendencia.
+  #
+  # A 1a versao disto olhava so "sobrou mais de uma vaga? entao nao cedo" -- e estava ERRADA,
+  # porque presume que a vaga fica RESERVADA ate o de prioridade maior acordar. Nao fica: cada
+  # sessao tica no seu minuto e quem chega primeiro leva. Medido em producao (rh-proxima, 3
+  # slots): process-reviewer (prio 10) pegou vaga as 01:14:07, dev-backend pegou a outra 11s
+  # depois, e o dev-frontend -- que era justamente quem os dois deviam deixar passar -- deferiu
+  # e so entrou 2 MINUTOS depois. A ordem que o operador configurou foi ignorada.
+  #
+  # Com $higherSlugs.Count vagas guardadas pra eles, a ordem volta a valer. Capacidade 1 ->
+  # $freeSlots = 1 e qualquer pendencia de prioridade maior faz ceder: a regra classica intacta.
+  # (Ceder sempre pode fazer o de numero baixo esperar muito quando os de cima nunca esvaziam --
+  # isso e inerente ao "cede a vez", nao efeito dos slots.)
+  if ($myPending -and $higherPending -and $freeSlots -le $higherSlugs.Count) {
     BusLog $base $sid $slug ("defer-prio>" + $higherSlug)   # SILENCIOSO
     BusBlock $null
   }

@@ -210,7 +210,7 @@ main() {
   # fyi pra quem ficou ocioso nunca seria entregue e o remetente acharia que avisou.
   FYI_WAKE_MIN=240
   inbox="$projroot/inbox"
-  mypending=0; higherpending=0; higherslug=""
+  mypending=0; higherpending=0; higherslug=""; higher_slugs=""
   if [ -d "$inbox" ]; then
     for f in "$inbox"/to-*.handoff; do
       [ -e "$f" ] || continue
@@ -223,17 +223,26 @@ main() {
       if [ "$toslug" = "$slug" ]; then mypending=1
       elif [ -n "$toslug" ]; then
         xp="$(getprio "$toslug")"
-        [ "$xp" -gt "$myprio" ] 2>/dev/null && { higherpending=1; [ -z "$higherslug" ] && higherslug="$toslug"; }
+        # Acumula os DISTINTOS de prioridade maior com pendencia: e quantas vagas precisam
+        # sobrar pra eles (ver 4b). Varios handoffs pro mesmo slug = 1 vaga so.
+        if [ "$xp" -gt "$myprio" ] 2>/dev/null; then
+          higherpending=1; [ -z "$higherslug" ] && higherslug="$toslug"
+          case ",$higher_slugs," in *",$toslug,"*) ;; *) higher_slugs="${higher_slugs:+$higher_slugs,}$toslug";; esac
+        fi
       fi
     done
   fi
 
   # 4b. PRIORIDADE: cedo a vez (defiro) se EU tenho trabalho e existe handoff p/ alguem de
   # prioridade MAIOR. Igual/menor nao bloqueia. So vale quando EU tenho trabalho.
-  # Com MAIS DE UM slot livre, ceder a vez seria ficar ocioso COM VAGA NA MESA -- o oposto do
-  # motivo de abrir slots. A cessao entrega um recurso ESCASSO: so vale se, depois de eu pegar
-  # o meu, nao sobraria slot pro de prioridade maior. Capacidade 1 -> free_slots=1 = regra classica.
-  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ] && [ "$free_slots" -le 1 ]; then
+  # CEDO A VEZ se as vagas livres NAO COBREM todos os de prioridade maior com pendencia.
+  # A 1a versao olhava so "sobrou mais de uma vaga? nao cedo" -- ERRADO: presume que a vaga fica
+  # RESERVADA ate o outro acordar, e nao fica (cada um tica no seu minuto, quem chega leva).
+  # Medido: process-reviewer (prio 10) pegou vaga, outro pegou a segunda 11s depois, e o
+  # dev-frontend -- a quem os dois deviam ceder -- so entrou 2 MINUTOS depois. Ver .ps1.
+  higher_count=0
+  [ -n "$higher_slugs" ] && higher_count=$(printf '%s' "$higher_slugs" | tr ',' '\n' | grep -c .)
+  if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ] && [ "$free_slots" -le "$higher_count" ]; then
     buslog "$base" "$sid" "$slug" "defer-prio>$higherslug"
     bus_block
   fi
