@@ -173,16 +173,26 @@ main() {
   done
   # LIVRE = nao existe, expirou, e meu sid, ou traz o MEU slug com sid velho (auto-cura do
   # /clear: o slug e exclusivo, entao aquele lock so pode ser encarnacao anterior de mim).
-  free_slots=0; holder_slug=""; sid_trocado=0
-  for lk in $slot_files; do
-    if [ ! -f "$lk" ]; then free_slots=$((free_slots+1)); continue; fi
+  # busy_slugs = quem esta AGORA com slot vivo. Varre os 3 arquivos (nao so os da capacidade):
+  # slot em DRENO tambem esta trabalhando, e o que importa e "ja tem a vez", nao "posso disputar".
+  free_slots=0; holder_slug=""; sid_trocado=0; busy_slugs=""
+  i=1
+  while [ "$i" -le 3 ]; do
+    if [ "$i" = "1" ]; then lk="$projroot/.bus-lock"; else lk="$projroot/.bus-lock-$i"; fi
+    in_cap=0; [ "$i" -le "$slot_cap" ] && in_cap=1
+    i=$((i+1))
+    if [ ! -f "$lk" ]; then [ "$in_cap" = "1" ] && free_slots=$((free_slots+1)); continue; fi
     lexp="$(sed -n 's/.*"exp_epoch":\([0-9]*\).*/\1/p' "$lk")"
     lsid="$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' "$lk")"
     lslug="$(sed -n 's/.*"slug":"\([^"]*\)".*/\1/p' "$lk")"
     if [ -z "$lexp" ] || [ "$now" -ge "$lexp" ] || [ "$lsid" = "$sid" ] || [ "$lslug" = "$slug" ]; then
-      free_slots=$((free_slots+1))
-      [ "$lslug" = "$slug" ] && [ "$lsid" != "$sid" ] && sid_trocado=1
-    elif [ -z "$holder_slug" ]; then holder_slug="$lslug"
+      if [ "$in_cap" = "1" ]; then
+        free_slots=$((free_slots+1))
+        [ "$lslug" = "$slug" ] && [ "$lsid" != "$sid" ] && sid_trocado=1
+      fi
+    else
+      case ",$busy_slugs," in *",$lslug,"*) ;; *) busy_slugs="${busy_slugs:+$busy_slugs,}$lslug";; esac
+      [ "$in_cap" = "1" ] && [ -z "$holder_slug" ] && holder_slug="$lslug"
     fi
   done
   [ "$sid_trocado" = "1" ] && buslog "$base" "$sid" "$slug" "lock-sid-trocado"
@@ -225,7 +235,9 @@ main() {
         xp="$(getprio "$toslug")"
         # Acumula os DISTINTOS de prioridade maior com pendencia: e quantas vagas precisam
         # sobrar pra eles (ver 4b). Varios handoffs pro mesmo slug = 1 vaga so.
-        if [ "$xp" -gt "$myprio" ] 2>/dev/null; then
+        # QUEM JA ESTA COM SLOT NAO CONTA: ja tem a vez, guardar outra vaga so deixa vaga parada.
+        busy=0; case ",$busy_slugs," in *",$toslug,"*) busy=1;; esac
+        if [ "$busy" = "0" ] && [ "$xp" -gt "$myprio" ] 2>/dev/null; then
           higherpending=1; [ -z "$higherslug" ] && higherslug="$toslug"
           case ",$higher_slugs," in *",$toslug,"*) ;; *) higher_slugs="${higher_slugs:+$higher_slugs,}$toslug";; esac
         fi
@@ -240,6 +252,9 @@ main() {
   # RESERVADA ate o outro acordar, e nao fica (cada um tica no seu minuto, quem chega leva).
   # Medido: process-reviewer (prio 10) pegou vaga, outro pegou a segunda 11s depois, e o
   # dev-frontend -- a quem os dois deviam ceder -- so entrou 2 MINUTOS depois. Ver .ps1.
+  # A 2a versao ainda guardava vaga pra quem JA ESTAVA COM SLOT -> vaga eternamente parada
+  # (medido 19/08: e2e no slot 1, slot 2 livre e process-reviewer deferindo pro e2e). Por isso
+  # $busy_slugs sai da conta acima.
   higher_count=0
   [ -n "$higher_slugs" ] && higher_count=$(printf '%s' "$higher_slugs" | tr ',' '\n' | grep -c .)
   if [ "$mypending" = "1" ] && [ "$higherpending" = "1" ] && [ "$free_slots" -le "$higher_count" ]; then

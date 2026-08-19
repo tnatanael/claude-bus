@@ -91,6 +91,8 @@ A regra correta **reserva**: cedo se as vagas livres **não cobrem** todos os sl
 
 Lição geral: **num sistema de tique, "há recurso livre agora" não é "haverá recurso quando o outro acordar".** Reservar é a única forma de a ordem configurada sobreviver à corrida entre tiques. (Ceder sempre pode fazer o de número baixo esperar muito quando os de cima nunca esvaziam — isso é inerente ao "cede a vez", não efeito dos slots.)
 
+**Terceira correção: reserva não vale pra quem já está com slot.** A regra acima ainda guardava vaga pra quem estava **trabalhando naquele instante** — e o resultado era uma vaga eternamente parada. Medido em 19/08 (`rh-proxima`, capacidade 2): `e2e` segurando o slot 1 com um handoff próprio ainda no inbox; `process-reviewer` (prio 10) com 12 pendentes e o **slot 2 livre** levando `defer-prio>e2e` tique após tique. Guardar a segunda vaga pro `e2e` não adiantava a vez dele um segundo — ele já tinha a vez na primeira. Agora quem aparece nos locks vivos (`$busySlugs`) **sai da conta** do `higherSlugs`. A varredura olha os **3** arquivos, não só os da capacidade: um slot em drenagem também está trabalhando. O teste da matriz (8 cenários × 2 shells) inclui esse caso e o do dreno.
+
 **Release e auto-cura passaram a varrer os 3 slots.** `bus-lock -Release` procura o slot com o **meu sid** (antes olhava só o `.bus-lock`); o `bus-name` faz o mesmo procurando o **meu slug** com sid velho (auto-cura do `/clear`). Sem isso, quem estivesse no slot 2 ou 3 nunca liberaria — e o slot ficaria preso até o lease de 1h.
 
 **O caminho fail-open do gate continua usando só o slot 1**, de propósito: sob erro inesperado, ser mais conservador (menos concorrência) é o comportamento certo.

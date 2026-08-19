@@ -247,28 +247,38 @@ try {
     $sv = 0
     if ([int]::TryParse((Get-Content -LiteralPath (Join-Path $projRoot '.bus-slots') -Raw -ErrorAction Stop).Trim(), [ref]$sv) -and $sv -ge 1 -and $sv -le 3) { $slotCap = $sv }
   } catch {}
-  $slotFiles = @()
-  for ($i = 1; $i -le $slotCap; $i++) {
-    $slotFiles += (Join-Path $projRoot $(if ($i -eq 1) { '.bus-lock' } else { '.bus-lock-' + $i }))
+  $allSlotFiles = @()
+  for ($i = 1; $i -le 3; $i++) {
+    $allSlotFiles += (Join-Path $projRoot $(if ($i -eq 1) { '.bus-lock' } else { '.bus-lock-' + $i }))
   }
+  $slotFiles = @($allSlotFiles[0..($slotCap - 1)])   # os que EU posso disputar
   # Um slot esta LIVRE se nao existe, esta expirado, e meu sid, ou traz o MEU slug com sid velho.
   # SID TROCOU (auto-cura): app trava, operador da /clear, a sessao ganha sid NOVO e o lock ficou
   # com o antigo. So por sid, a sessao nova nao reconhece o proprio lock, nao libera, e o slot
   # fica preso ate o lease de 1h. O registro do slug e EXCLUSIVO (bus-name -Set evicta os outros
   # sids do mesmo projeto+slug), entao lock em nome do MEU slug so pode ser encarnacao anterior
   # de MIM -> nao defiro; sigo e roubo no acquire.
-  $freeSlots = 0; $holderSlug = ''; $sidTrocado = $false
-  foreach ($lf in $slotFiles) {
-    if (-not (Test-Path -LiteralPath $lf)) { $freeSlots++; continue }
+  # $busySlugs = quem esta AGORA com um slot vivo. Varre os 3 arquivos (nao so os da capacidade):
+  # um slot em DRENO (capacidade baixada com o slot ainda ocupado) tambem esta trabalhando, e o
+  # que importa aqui e "esse especialista ja tem a vez", nao "eu posso disputar esse arquivo".
+  $freeSlots = 0; $holderSlug = ''; $sidTrocado = $false; $busySlugs = @{}
+  for ($i = 0; $i -lt $allSlotFiles.Count; $i++) {
+    $lf = $allSlotFiles[$i]; $inCap = ($i -lt $slotCap)
+    if (-not (Test-Path -LiteralPath $lf)) { if ($inCap) { $freeSlots++ }; continue }
     try {
       $L = (Get-Content -LiteralPath $lf -Raw) | ConvertFrom-Json
       $exp = [datetimeoffset]::Parse($L.expiry)
       $meuSlugSidVelho = ([string]$L.slug -eq $slug -and $L.sid -ne $sid)
       if ($now -ge $exp -or $L.sid -eq $sid -or $meuSlugSidVelho) {
-        $freeSlots++
-        if ($meuSlugSidVelho) { $sidTrocado = $true }
-      } elseif (-not $holderSlug) { $holderSlug = [string]$L.slug }
-    } catch { $freeSlots++ }   # lock corrompido/ilegivel -> trata como livre
+        if ($inCap) {
+          $freeSlots++
+          if ($meuSlugSidVelho) { $sidTrocado = $true }
+        }
+      } else {
+        $busySlugs[[string]$L.slug] = $true
+        if ($inCap -and -not $holderSlug) { $holderSlug = [string]$L.slug }
+      }
+    } catch { if ($inCap) { $freeSlots++ } }   # lock corrompido/ilegivel -> trata como livre
   }
   if ($sidTrocado) { BusLog $base $sid $slug 'lock-sid-trocado' }
   if ($freeSlots -eq 0) {
@@ -322,7 +332,9 @@ try {
         $xPrio = if ($prio.ContainsKey($toSlug)) { $prio[$toSlug] } else { 1000 }
         # Conta os DISTINTOS de prioridade maior com pendencia -- e quantas vagas precisam
         # sobrar pra eles (ver 5b). Varios handoffs pro mesmo slug continuam sendo 1 vaga.
-        if ($xPrio -gt $myPrio) { $higherPending = $true; $higherSlugs[$toSlug] = $true; if (-not $higherSlug) { $higherSlug = $toSlug } }
+        # QUEM JA ESTA COM SLOT NAO CONTA: ele ja TEM a vez, guardar outra vaga pra ele nao
+        # adianta a vez de ninguem -- so deixa a vaga parada. Ver a medicao no 5b.
+        if ($xPrio -gt $myPrio -and -not $busySlugs.ContainsKey($toSlug)) { $higherPending = $true; $higherSlugs[$toSlug] = $true; if (-not $higherSlug) { $higherSlug = $toSlug } }
       }
     }
   }
@@ -344,6 +356,12 @@ try {
   # $freeSlots = 1 e qualquer pendencia de prioridade maior faz ceder: a regra classica intacta.
   # (Ceder sempre pode fazer o de numero baixo esperar muito quando os de cima nunca esvaziam --
   # isso e inerente ao "cede a vez", nao efeito dos slots.)
+  #
+  # A 2a versao ainda guardava vaga pra quem JA ESTAVA COM SLOT -- e o resultado era uma vaga
+  # eternamente parada. Medido em 19/08 (rh-proxima, capacidade 2): e2e segurando o slot 1 com
+  # um handoff proprio ainda no inbox; process-reviewer (prio 10) com 12 pendentes e o slot 2
+  # LIVRE levou 'defer-prio>e2e' tique apos tique -- guardando a segunda vaga pro e2e, que ja
+  # estava trabalhando na primeira. Por isso $busySlugs sai da conta no passo 5.
   if ($myPending -and $higherPending -and $freeSlots -le $higherSlugs.Count) {
     BusLog $base $sid $slug ("defer-prio>" + $higherSlug)   # SILENCIOSO
     BusBlock $null
