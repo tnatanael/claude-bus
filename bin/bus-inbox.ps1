@@ -90,6 +90,31 @@ function Get-BusSecret([string]$root) {
   return (Get-Content -LiteralPath $path -Raw -Encoding UTF8).Trim()
 }
 
+# PAPEL derivado do .priority -- nao e um campo novo, e leitura do que ja existe. CONTROLADOR =
+# o de MENOR prioridade do projeto (definicao que a skill ja usava): e a interface de entrada,
+# quem fala com o operador. Os outros sao BACKGROUND: trabalham calados e registram no ticket.
+# So sai quando existe hierarquia de verdade (alguem abaixo do default 1000); projeto sem
+# controlador nao ganha papel nenhum e segue como antes (cada um consolida a propria frente).
+# NAO indexar por "tem prioridade setada": um arquiteto em 10 e escalonamento, nao interface --
+# e um controlador que o operador esqueceu de setar sumiria como interface do projeto.
+$busRole = ''
+$prioFile = Join-Path $BusRoot '.priority'
+if (Test-Path -LiteralPath $prioFile) {
+  $pr = @{}
+  foreach ($ln in @(Get-Content -LiteralPath $prioFile -ErrorAction SilentlyContinue)) {
+    $kv = $ln -split ':', 2
+    if ($kv.Count -eq 2) { $n = 0; if ([int]::TryParse($kv[1].Trim(), [ref]$n)) { $pr[$kv[0].Trim()] = $n } }
+  }
+  if ($pr.Count -gt 0) {
+    $minPrio = ($pr.Values | Measure-Object -Minimum).Minimum
+    if ($minPrio -lt 1000) {
+      $myPrio = if ($pr.ContainsKey($Me)) { $pr[$Me] } else { 1000 }
+      $busRole = if ($myPrio -le $minPrio) { 'controlador' } else { 'background' }
+      Write-Output ('BUS_ROLE=' + $busRole)
+    }
+  }
+}
+
 $inbox    = Join-Path $BusRoot 'inbox'
 $rejected = Join-Path $BusRoot 'rejected'
 New-Item -ItemType Directory -Force -Path $inbox | Out-Null
@@ -100,7 +125,7 @@ $prefix = 'to-' + $Me + '__'
 # resolvidos em caminho absoluto (os scripts sao irmaos deste -- vale no plugin, em bin\, e no
 # install local, em skills\bus\). E a alternativa barata a carregar a SKILL.md inteira (~2.5k
 # tokens) em TODO tique produtivo: aqui sao ~450. So sai com -Protocol e so quando ha trabalho.
-function Get-BusProtocol([int]$n) {
+function Get-BusProtocol([int]$n, [string]$role) {
   # Caminho em ASPAS SIMPLES (vale no PowerShell e no bash). O prompt do tique NAO se repete
   # aqui: ele ja saiu como BUS_TICK_PROMPT= no topo, e o passo 5 so manda copiar de la.
   $cInbox = $PSCMD + " '" + (Join-Path $PSScriptRoot 'bus-inbox.ps1') + "'"
@@ -124,6 +149,8 @@ Comandos (ja resolvidos; nao os reproduza no output):
      SEND -To <BUS_FROM> -From <BUS_SLUG> -Project <BUS_PROJECT> -BodyFile <arq> -InReplyTo <BUS_ID>
   BLOCO COM BUS_KIND=fyi: e so informacao. NAO executa, NAO responde -- leia e mova pra \done\.
   Ele nao te acordou; veio de carona neste wake.
+  BLOCO COM BUS_ISSUE=<n|url>: o retorno vai pro TICKET (gh issue comment), nao por handoff --
+  e la que o operador e os usuarios leem, e la que fica o historico. Feche o BUS_FILE igual.
 3 DRENE: rode INBOX de novo (sem -Protocol); veio bloco novo -> volte ao 2; ate BUS_EMPTY.
   EXCECAO: saiu BUS_MORE=<k> -> NAO drene, pule pro 5. O proximo tique pega o resto.
 4 BUS_STALE_PROCESSING= e trabalho SEU preso (turno morto, /clear, lease vencido) e NINGUEM
@@ -138,9 +165,24 @@ Comandos (ja resolvidos; nao os reproduza no output):
   alguem que NAO esta no BUS_PENDING? O retorno nao vem sozinho -> mande handoff pedindo status.
 Tique vazio nao merece output; nao narre mecanica pro operador.
 Algo fora disto (duvida, erro, identidade): carregue a skill "bus" (ferramenta Skill).
-BUS_PROTOCOL_END
+{{ROLE}}BUS_PROTOCOL_END
 '@
-  return $t.Replace('{{SEND}}', $cSend).Replace('{{INBOX}}', $cInbox).Replace('{{LOCK}}', $cLock).Replace('{{N}}', [string]$n)
+  # So a linha do SEU papel entra -- o protocolo e pago a cada tique produtivo.
+  $roleTxt = ''
+  if ($role -eq 'background') {
+    $roleTxt = @'
+PAPEL: BACKGROUND (voce nao e o controlador). Trabalhe calado: nada de output pro operador, e o
+  registro vai pro TICKET quando o bloco trouxer BUS_ISSUE. EXCECAO: bloqueio ou impasse que so
+  o operador resolve FURA o silencio -- travar quieto e pior que falar.
+'@
+  } elseif ($role -eq 'controlador') {
+    $roleTxt = @'
+PAPEL: CONTROLADOR (menor prioridade do projeto). Voce e a interface com o operador: consolida e
+  reporta. Ainda assim, no maximo 1 linha, sem narrar mecanica.
+'@
+  }
+  if ($roleTxt -ne '') { $roleTxt = $roleTxt.TrimEnd() + "`n" }
+  return $t.Replace('{{SEND}}', $cSend).Replace('{{INBOX}}', $cInbox).Replace('{{LOCK}}', $cLock).Replace('{{N}}', [string]$n).Replace('{{ROLE}}', $roleTxt)
 }
 
 $hits = Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue |
@@ -180,6 +222,7 @@ foreach ($hit in $hits) {
   $hId   = if ($header -match '(?m)^id:\s*(\S+)') { $matches[1] } else { '' }
   $hRR   = if ($header -match '(?m)^reply_required:\s*(\S+)') { $matches[1] } else { 'false' }
   $hIRT  = if ($header -match '(?m)^in_reply_to:\s*(\S+)') { $matches[1] } else { '' }
+  $hIss  = if ($header -match '(?m)^issue:\s*(\S+)') { $matches[1] } else { '' }
   $body  = if ($split.Count -gt 1) { $split[1] } else { '' }
   $body  = ($body -replace '(?m)^\s*###BUS-END\s*$', '').Trim()
   # Atribuicao DENTRO do ramo, nao "$tgt = if (...) {$lista}": o if como expressao ENUMERA a
@@ -190,6 +233,7 @@ foreach ($hit in $hits) {
   $tgt.Add('BUS_ID=' + $hId) | Out-Null
   if ($isFyi) { $tgt.Add('BUS_KIND=fyi') | Out-Null }
   $tgt.Add('BUS_REPLY_REQUIRED=' + $hRR) | Out-Null
+  if ($hIss) { $tgt.Add('BUS_ISSUE=' + $hIss) | Out-Null }
   if ($hIRT) { $tgt.Add('BUS_IN_REPLY_TO=' + $hIRT) | Out-Null }
   $tgt.Add('BUS_BODY_BEGIN') | Out-Null
   $tgt.Add($body) | Out-Null
@@ -214,7 +258,7 @@ foreach ($h in (Get-ChildItem -LiteralPath (Join-Path $BusRoot 'processing') -Fi
 
 # EMISSAO (o stale e calculado antes so pra decidir isto): o protocolo vem PRIMEIRO, e so quando
 # ha trabalho de verdade -- tique sem nada nao paga por instrucao que ninguem vai executar.
-if ($Protocol -and ($found -gt 0 -or $fyiFound -gt 0 -or $stale.Count -gt 0)) { Write-Output (Get-BusProtocol $cronInterval) }
+if ($Protocol -and ($found -gt 0 -or $fyiFound -gt 0 -or $stale.Count -gt 0)) { Write-Output (Get-BusProtocol $cronInterval $busRole) }
 foreach ($b in $blocks) { Write-Output $b }
 if ($more -gt 0) { Write-Output ('BUS_MORE=' + $more) }
 foreach ($b in $fyiBlocks) { Write-Output $b }

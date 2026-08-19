@@ -52,6 +52,7 @@ Slug/projeto minúsculos, sem espaço.
    ```
    BUS_CRON_INTERVAL=<N>        (arme */N no passo 6)
    BUS_TICK_PROMPT=<frase>      (o prompt do cron, literal — passo 6)
+   BUS_ROLE=controlador|background   (§4; ausente = projeto sem controlador)
    BUS_SLUG= / BUS_PROJECT=     (guarde: -From e -Project dos retornos)
    BUS_FILE=<caminho absoluto>
    BUS_FROM=<quem enviou>       BUS_ID=<id — use no -InReplyTo>
@@ -59,6 +60,7 @@ Slug/projeto minúsculos, sem espaço.
    BUS_BODY_BEGIN <corpo limpo> BUS_BODY_END
    BUS_MORE=<k>                 sobraram k no inbox (lote de 3) → NÃO drene
    BUS_KIND=fyi                 (no bloco) só informação: não execute, não responda
+   BUS_ISSUE=<n|url>            (no bloco) o retorno vai pro TICKET, não por handoff
    BUS_STALE_PROCESSING=<caminho> (parado há N min)   0+ linhas → passo 5
    BUS_PENDING=<destinos com TASK pendente>  vazio = bus parado (fyi não conta: não acorda)
    ```
@@ -107,6 +109,15 @@ Slug/projeto minúsculos, sem espaço.
 - **Peer-to-peer**, dentro do projeto. **Não assuma frente alheia** (observe/valide e informe). Impasses sobem pro operador.
 - **Output pro operador: o mínimo** — no máximo 1 linha, ou nada. Não narre mecânica. Resumo é sob demanda (e é papel do controlador, se houver).
 - **CONTROLADOR** = o de **menor prioridade** (ex.: `0`): consolida por último, é dono do backlog de macro-tarefas (**despacha a próxima onda assim que os outros esvaziam — ninguém ocioso**) e **declara o FIM** (inbox vazio dos outros ≠ projeto acabado). Sem controlador: cada um consolida a própria frente.
+
+### 🔇 `BUS_ROLE` — quem fala com o operador
+
+Os scripts devolvem `BUS_ROLE=` derivado do `.priority` (não é config nova): **controlador** = menor prioridade do projeto; **background** = todos os outros. Sem hierarquia (ninguém abaixo de 1000), não vem papel nenhum e vale a regra de sempre.
+
+- **`background`** → **trabalhe calado**: nada de output pro operador. Bloco com `BUS_ISSUE=<n|url>`? O registro vai pro **ticket** (`gh issue comment`), que é onde o operador e os usuários leem — e onde fica o histórico, já que o BUS vive no `%TEMP%` e esquece. Feche o `BUS_FILE` normalmente.
+- **`controlador`** → você é a **interface** do projeto: consolida e reporta. Ainda assim, 1 linha, sem narrar mecânica.
+
+⚠️ **Silêncio tem válvula: bloqueio ou impasse que só o operador resolve FURA o silêncio.** Travar quieto é pior que falar.
 
 ### ⚠️ Mantenha o fio vivo — "posso encerrar?"
 

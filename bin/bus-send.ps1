@@ -17,6 +17,7 @@ param(
   [string]$BodyFile = '',
   [switch]$ReplyRequired,
   [switch]$Fyi,
+  [string]$Issue = '',
   [string]$InReplyTo = '',
   [string]$Project = '',
   [string]$BusRoot = ''
@@ -73,6 +74,10 @@ $tmp   = $final + '.tmp'
 
 $kind  = if ($Fyi) { 'fyi' } else { 'task' }
 
+# -Issue: amarra o handoff a uma issue do GitHub (numero ou URL). Quem recebe responde NO
+# TICKET, nao por handoff de volta -- e la que o operador e os usuarios finais leem, e e la que
+# fica o historico (o BUS vive no %TEMP% e esquece). Quem preenche isto na pratica e o carteiro
+# do /bus-git-watch, que ja tem a issue na mao quando despacha.
 $lines = @(
   '###BUS-START'
   'id: '             + $id
@@ -81,6 +86,9 @@ $lines = @(
   'auth: '           + $secret
   'reply_required: ' + $rr
   'kind: '           + $kind
+)
+if ($Issue -ne '') { $lines += ('issue: ' + $Issue) }
+$lines += @(
   'in_reply_to: '    + $InReplyTo
   '---'
   $Body

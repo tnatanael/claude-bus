@@ -4,7 +4,7 @@
 # de auth. NAO TESTADO no Unix ainda -- validar.
 set -u
 base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
-to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""; kind="task"
+to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""; kind="task"; issue=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --to) to="$2"; shift 2;;
@@ -13,6 +13,7 @@ while [ $# -gt 0 ]; do
     --body-file) bodyfile="$2"; shift 2;;
     --reply) reply="true"; shift;;
     --fyi) kind="fyi"; shift;;
+    --issue) issue="$2"; shift 2;;
     --in-reply-to) inreply="$2"; shift 2;;
     --project) project="$2"; shift 2;;
     --bus-root) bus_root="$2"; shift 2;;
@@ -60,6 +61,10 @@ tmp="$final.tmp"
   printf 'auth: %s\n' "$secret"
   printf 'reply_required: %s\n' "$reply"
   printf 'kind: %s\n' "$kind"
+  # --issue amarra o handoff a uma issue do GitHub: quem recebe responde NO TICKET, nao por
+  # handoff de volta -- e la que o operador e os usuarios leem, e la fica o historico (o BUS
+  # vive no /tmp e esquece). Na pratica quem preenche e o carteiro do /bus-git-watch.
+  [ -n "$issue" ] && printf 'issue: %s\n' "$issue"
   printf 'in_reply_to: %s\n' "$inreply"
   printf -- '---\n'
   printf '%s\n' "$body"

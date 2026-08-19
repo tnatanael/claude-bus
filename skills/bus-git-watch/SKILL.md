@@ -127,7 +127,7 @@ A notificação só diz que a tarefa terminou — **leia o arquivo de output**.
 
 **`MUDOU_NO_GITHUB`** → para **CADA** evento:
 
-1. **Mande o handoff** (*enviar* do `/bus`, com `-Project <PROJECT>` e `-From <SLUG>`) pro especialista dono do assunto.
+1. **Mande o handoff** (*enviar* do `/bus`, com `-Project <PROJECT>`, `-From <SLUG>` e **`-Issue <url ou número>`**) pro especialista dono do assunto. O `-Issue` grava `issue:` no handoff: o BUS entrega isso como `BUS_ISSUE=` e o especialista já sabe, **pelo protocolo**, que o retorno vai pro ticket — não depende de ele ter lido o corpo até o fim.
 2. **Melhore o enunciado**: explicite o que muda, onde e por quê; separe o que ele já sabe do que é novo; deixe clara a próxima ação. **Não analise e não responda o ticket** — quem valida e responde é o dono do território.
 3. **Fila: um ticket por vez POR ESPECIALISTA.** Não repasse o #2 dele enquanto o #1 não fechar. Mas **não** é fila global: segurar um ticket de frontend porque um de backend está aberto deixa gente ociosa com trabalho na mesa.
 4. **Registre o evento** no estado (passo 6).

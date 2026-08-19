@@ -60,6 +60,20 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## `BUS_ROLE` e `issue:` — papel derivado, registro durável (v0.9.7)
+
+A ideia original do operador era: *"agente **sem prioridade setada** opera como background, output mínimo, interagindo só com a issue"*. A intuição estava certa; a **chave** estava errada, em dois pontos.
+
+**1. "Tem prioridade setada" não identifica a interface.** O `arquiteto` do `cl-adv` está em `10` por razão puramente de escalonamento e não é interface de ninguém. Pior, a inversa: um controlador que o operador **esqueceu** de setar viraria background e **sumiria como interface do projeto** — um esquecimento virando duas falhas.
+
+O que se queria já existe e é computável: **controlador = a MENOR prioridade do projeto** (a definição que a skill já usava). O leitor lê o `.priority` de qualquer jeito, então devolve `BUS_ROLE=controlador|background` e o protocolo imprime **só a linha do seu papel**. Sem hierarquia no projeto (ninguém abaixo de 1000), nenhum papel é emitido e o comportamento anterior continua valendo — nada de silenciar um time que nunca escolheu controlador.
+
+**2. "Interagir só com a issue" precisava de um vínculo que não existia.** Só os handoffs nascidos do `/bus-git-watch` vêm de uma issue; `po → dev-backend "faça X"` não tem nenhuma. Daí o header **`issue:`** (`-Issue`/`--issue`), que o carteiro preenche e o leitor entrega como `BUS_ISSUE=`. A regra é condicional ao campo: **com `issue:`, o retorno vai pro ticket; sem, handoff normal.** É extensão do `bus-git-watch` (que já pregava "o especialista responde no ticket"), não da prioridade.
+
+**A válvula que faltava na proposta:** silêncio precisa de exceção. Um worker que trava e fica quieto porque "é background" some do radar. Por isso a linha do papel termina em *"bloqueio ou impasse que só o operador resolve FURA o silêncio"* — coerente com o `Impasses sobem pro operador` que já estava na §4.
+
+**Onde está a economia de verdade:** não é no output do terminal (1 linha, troco). É em **worker registra na issue em vez de mandar handoff de status pro PO**: 5 workers × 1 status = **5 wakes do PO evitados**. Mesma lógica do `kind: fyi`, por outro caminho — FYI para o que o peer precisa saber agora, issue para o que precisa ficar registrado.
+
 ## `kind: fyi` — separar **acordar** de **entregar** (v0.9.6)
 
 Até aqui todo handoff era gatilho de wake, e **o wake é a unidade cara**: protocolo + corpo + o turno inteiro do modelo + re-arme do cron + release do lock. Um "terminei X" custava tudo isso pra não gerar ação nenhuma.

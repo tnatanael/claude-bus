@@ -50,6 +50,8 @@ Comandos (ja resolvidos; nao os reproduza no output):
      SEND --to <BUS_FROM> --from <BUS_SLUG> --project <BUS_PROJECT> --body-file <arq> --in-reply-to <BUS_ID>
   BLOCO COM BUS_KIND=fyi: e so informacao. NAO executa, NAO responde -- leia e mova pra /done/.
   Ele nao te acordou; veio de carona neste wake.
+  BLOCO COM BUS_ISSUE=<n|url>: o retorno vai pro TICKET (gh issue comment), nao por handoff --
+  e la que o operador e os usuarios leem, e la que fica o historico. Feche o BUS_FILE igual.
 3 DRENE: rode INBOX de novo (sem --protocol); veio bloco novo -> volte ao 2; ate BUS_EMPTY.
   EXCECAO: saiu BUS_MORE=<k> -> NAO drene, pule pro 5. O proximo tique pega o resto.
 4 BUS_STALE_PROCESSING= e trabalho SEU preso (turno morto, /clear, lease vencido) e NINGUEM
@@ -64,8 +66,21 @@ Comandos (ja resolvidos; nao os reproduza no output):
   alguem que NAO esta no BUS_PENDING? O retorno nao vem sozinho -> mande handoff pedindo status.
 Tique vazio nao merece output; nao narre mecanica pro operador.
 Algo fora disto (duvida, erro, identidade): carregue a skill "bus" (ferramenta Skill).
-BUS_PROTOCOL_END
 EOF
+  # So a linha do SEU papel entra -- o protocolo e pago a cada tique produtivo.
+  if [ "$bus_role" = "background" ]; then
+    cat <<'EOF'
+PAPEL: BACKGROUND (voce nao e o controlador). Trabalhe calado: nada de output pro operador, e o
+  registro vai pro TICKET quando o bloco trouxer BUS_ISSUE. EXCECAO: bloqueio ou impasse que so
+  o operador resolve FURA o silencio -- travar quieto e pior que falar.
+EOF
+  elif [ "$bus_role" = "controlador" ]; then
+    cat <<'EOF'
+PAPEL: CONTROLADOR (menor prioridade do projeto). Voce e a interface com o operador: consolida e
+  reporta. Ainda assim, no maximo 1 linha, sem narrar mecanica.
+EOF
+  fi
+  echo "BUS_PROTOCOL_END"
 }
 
 # Intervalo do cron (GLOBAL, config do dashboard em <base>/.bus-cron-interval). Default 5, clamp [1,30].
@@ -105,6 +120,20 @@ fi
 
 # Marcador "visto por ultimo" na BASE (global): mantem o "armado" do dashboard fresco.
 [ -n "$sid" ] && { mkdir -p "$base/seen"; date +%s > "$base/seen/$sid"; }
+
+# PAPEL derivado do .priority (nao e campo novo). CONTROLADOR = o de MENOR prioridade do projeto
+# -- a interface com o operador; os outros sao BACKGROUND (trabalham calados, registram no
+# ticket). So sai quando ha hierarquia de verdade (alguem abaixo do default 1000).
+bus_role=""
+if [ -f "$bus_root/.priority" ]; then
+  min_prio=$(sed -n 's/^[^:]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$bus_root/.priority" | sort -n | head -n1)
+  if [ -n "$min_prio" ] && [ "$min_prio" -lt 1000 ] 2>/dev/null; then
+    my_prio=$(sed -n "s/^[[:space:]]*$me[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$bus_root/.priority" | head -n1)
+    [ -z "$my_prio" ] && my_prio=1000
+    if [ "$my_prio" -le "$min_prio" ]; then bus_role="controlador"; else bus_role="background"; fi
+    echo "BUS_ROLE=$bus_role"
+  fi
+fi
 
 inbox="$bus_root/inbox"; rejected="$bus_root/rejected"
 mkdir -p "$inbox"
@@ -146,6 +175,7 @@ for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   hid="$(printf '%s' "$header" | sed -n 's/^id:[[:space:]]*//p' | tr -d '\r' | head -n1)"
   hrr="$(printf '%s' "$header" | sed -n 's/^reply_required:[[:space:]]*//p' | tr -d '\r' | head -n1)"
   hirt="$(printf '%s' "$header" | sed -n 's/^in_reply_to:[[:space:]]*//p' | tr -d '\r' | head -n1)"
+  hiss="$(printf '%s' "$header" | sed -n 's/^issue:[[:space:]]*//p' | tr -d '\r' | head -n1)"
   # corpo = tudo depois da 1a linha '---', sem a linha ###BUS-END
   body="$(printf '%s\n' "$raw" | sed '1,/^---[[:space:]]*$/d' | sed '/^###BUS-END[[:space:]]*$/d')"
   [ -z "$hrr" ] && hrr="false"
@@ -165,6 +195,7 @@ for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
     echo "BUS_ID=$hid"
     [ "$isfyi" = "1" ] && echo "BUS_KIND=fyi"
     echo "BUS_REPLY_REQUIRED=$hrr"
+    [ -n "$hiss" ] && echo "BUS_ISSUE=$hiss"
     [ -n "$hirt" ] && echo "BUS_IN_REPLY_TO=$hirt"
     echo "BUS_BODY_BEGIN"
     printf '%s\n' "$body"
