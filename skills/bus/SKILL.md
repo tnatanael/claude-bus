@@ -30,6 +30,10 @@ Base: Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_
 - `INVERTED` → digitaram na ordem antiga (slug primeiro) e **nada foi gravado**. Mostre o `HINT=` e confirme antes de repetir.
 - `LOCK_ORFAO_LIBERADO=<sid8>` → esta sessão teve `/clear` e o sid anterior morreu **segurando o lock do projeto**; o re-arme liberou. **Reporte em 1 linha** (o projeto estava travado pra todos).
 
+🌳 **Confira a ÁRVORE (uma vez, aqui).** O `CLAUDE.md` do projeto declara a quem serve, na 1ª linha: `<!-- BUS: projeto <slug-do-projeto> -->`. Ele é herdado pelas subpastas — um arquivo na raiz do projeto vale pra todos os especialistas dele *(verificado: sessão em `projects/cl/ads` carrega o `projects/cl/CLAUDE.md`)*.
+- **Declarou outro projeto** → você está na árvore errada: **pare e avise o operador.** Você seguiria a política de outro time sem erro nenhum aparecer.
+- **Não há `CLAUDE.md` de projeto** (só o global) → siga, mas **diga ao operador em 1 linha** que o projeto está sem regras próprias. Silêncio aqui vira regra inventada depois.
+
 Depois de registrar: **desarme+arme o cron (passo 1 do fluxo) e PARE.** Reporte `configurado: slug/projeto/prioridade`.
 🔄 **Veio de um `/clear`?** Não tente lembrar nada: o próximo tique te devolve o que ficou preso via `BUS_STALE_PROCESSING` — a retomada é o **passo 5**.
 
@@ -53,6 +57,7 @@ Slug/projeto minúsculos, sem espaço.
    BUS_CRON_INTERVAL=<N>        (arme */N no passo 6)
    BUS_TICK_PROMPT=<frase>      (o prompt do cron, literal — passo 6)
    BUS_ROLE=controlador|background   (§4; ausente = projeto sem controlador)
+   BUS_STATE=<caminho do .state-<slug>.md>   sua memória entre wakes (§ abaixo)
    BUS_SLUG= / BUS_PROJECT=     (guarde: -From e -Project dos retornos)
    BUS_FILE=<caminho absoluto>
    BUS_FROM=<quem enviou>       BUS_ID=<id — use no -InReplyTo>
@@ -118,6 +123,16 @@ Os scripts devolvem `BUS_ROLE=` derivado do `.priority` (não é config nova): *
 - **`controlador`** → você é a **interface** do projeto: consolida e reporta. Ainda assim, 1 linha, sem narrar mecânica.
 
 ⚠️ **Silêncio tem válvula: bloqueio ou impasse que só o operador resolve FURA o silêncio.** Travar quieto é pior que falar.
+
+### 🧠 `BUS_STATE` — a conversa é descartável, o arquivo é a memória
+
+Compactação e `/clear` apagam o que você sabe; **arquivo sobrevive**. O leitor devolve `BUS_STATE=<projeto>/.state-<slug>.md` — mesma raiz do projeto, então sobrevive a restart, a `/clear` e à troca de sid, e **qualquer encarnação sua acha sozinha**.
+
+- **Acordou sem saber onde parou? LEIA antes de agir.** É o passo 0 do protocolo.
+- **Atualize quando o rumo MUDA** (decisão tomada, beco sem saída, próximo passo outro) — não a cada tique. **Sobrescreva**, ~40 linhas; anexar transforma memória em diário, e você paga o diário inteiro em todo wake.
+- **Guarde só o que não dá pra redescobrir:** decisões e o que já falhou (com o porquê). O que está no git, no arquivo ou na issue **fica lá** — mande o caminho, é a mesma disciplina do corpo do handoff.
+- ⚠️ **Estado ≠ mundo.** Antes de re-executar, **confirme no mundo** (o commit está lá? o teste passa?). Arquivo desatualizado obedecido às cegas duplica commit, e-mail e deploy.
+- É o **alvo** do self-handoff: o corpo vira ponteiro (*"continua no checkpoint X"*) porque o conteúdo mora aqui.
 
 ### ⚠️ Mantenha o fio vivo — "posso encerrar?"
 

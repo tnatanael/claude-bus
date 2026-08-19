@@ -159,9 +159,12 @@ O handoff é **unidirecional**: o especialista responde **no ticket**, não de v
 
 **Cada projeto tem as suas, e o gate de um não governa o outro.** **Não presuma o caminho:** apontar pro documento errado faz o especialista seguir a política de **outro time** — e ele vai obedecer, porque veio de você. Procure nesta ordem:
 
-1. documento de regras na raiz do repo (`GATE.md`, `CONTRIBUTING.md`, equivalente);
-2. `docs/conventions.md` + os hooks em `.githooks/`;
-3. **não achou nenhum? PERGUNTE ao operador antes de despachar** — não invente regra de qualidade.
+1. **`CLAUDE.md` na raiz do projeto** — se ele declara `<!-- BUS: projeto <o seu> -->`, é o canônico e a busca **acaba aqui**: é herdado por todas as subpastas, então é o único documento que você sabe que o especialista já tem em contexto;
+2. documento de regras na raiz do repo (`GATE.md`, `CONTRIBUTING.md`, equivalente);
+3. `docs/conventions.md` + os hooks em `.githooks/`;
+4. **não achou nenhum? PERGUNTE ao operador antes de despachar** — não invente regra de qualidade.
+
+⚠️ Um `CLAUDE.md` que declara **outro** projeto não serve — é a árvore errada, e vale a mesma regra do vazamento abaixo.
 
 Achou? Então **em CADA handoff** inclua: *"siga as regras do `<arquivo>` deste projeto"*, e **guarde o caminho no `rules_file` do estado** (passo 6) pra não reprocurar.
 

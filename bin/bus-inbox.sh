@@ -39,6 +39,9 @@ Comandos (ja resolvidos; nao os reproduza no output):
   INBOX = $c_inbox
   SEND  = $c_send
   LOCK  = $c_lock
+0 NAO SABE ONDE PAROU (contexto novo, pos-/clear, pos-compactacao)? LEIA o BUS_STATE ANTES de
+  agir -- e a sua memoria entre wakes. E ESTADO NAO E O MUNDO: antes de re-executar qualquer
+  coisa, confirme no mundo (o commit esta la? o teste passa?). Nunca re-execute as cegas.
 1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
   prompt comece com "/bus" ou "bus-tick" (tem que ficar ZERO). Re-arma so no passo 5.
 2 PARA CADA bloco BUS_FILE abaixo, nesta ordem:
@@ -61,6 +64,10 @@ Comandos (ja resolvidos; nao os reproduza no output):
   a) CronCreate(cron:"*/$cron_interval * * * *", recurring:true, prompt: o BUS_TICK_PROMPT= do
      topo, copiado LITERAL (nao reescreva o caminho)
   b) LOCK    <- SEMPRE, mesmo sem ter processado nada
+  ANTES DISSO, se este wake MUDOU o rumo (decisao tomada, beco sem saida, proximo passo outro):
+  reescreva o BUS_STATE -- decisoes, o que ja tentou e falhou (e por que), proximo passo. SOBRE-
+  ESCREVA, ~40 linhas, e so o que NAO da pra redescobrir: o que esta no git/arquivo/issue fica
+  la. Tique que nao mudou nada nao mexe no arquivo.
   BUS-SHUTDOWN no corpo -> nao re-arme, libere o lock, encerre em silencio.
 6 Antes de encerrar: tem passo SEU que nao depende de terceiro? Faca agora, neste turno. Espera
   alguem que NAO esta no BUS_PENDING? O retorno nao vem sozinho -> mande handoff pedindo status.
@@ -134,6 +141,13 @@ if [ -f "$bus_root/.priority" ]; then
     echo "BUS_ROLE=$bus_role"
   fi
 fi
+
+# MEMORIA ENTRE WAKES: <projeto>/.state-<slug>.md. A conversa nao sobrevive a compactacao nem ao
+# /clear; arquivo sobrevive. Fica na raiz do PROJETO (nao no scratchpad, indexado por sid, que
+# vira orfao no /clear -- licao que o /bus-git-watch ja pagou) e e dotfile: nao vira projeto no
+# dashboard. E o alvo que faltava pra regra "self-handoff e PONTEIRO".
+state_file="$bus_root/.state-$me.md"
+if [ -f "$state_file" ]; then echo "BUS_STATE=$state_file"; else echo "BUS_STATE=$state_file (ainda nao existe)"; fi
 
 inbox="$bus_root/inbox"; rejected="$bus_root/rejected"
 mkdir -p "$inbox"

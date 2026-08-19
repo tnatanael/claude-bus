@@ -115,6 +115,14 @@ if (Test-Path -LiteralPath $prioFile) {
   }
 }
 
+# MEMORIA ENTRE WAKES: <projeto>/.state-<slug>.md. A conversa nao sobrevive a compactacao nem ao
+# /clear; arquivo sobrevive. Fica na raiz do PROJETO (nao no scratchpad da sessao, que e indexado
+# por sid e vira orfao no /clear -- licao que o /bus-git-watch ja tinha pago) e e dotfile, entao
+# nao aparece como projeto no dashboard. Tambem e o alvo que faltava pra regra "self-handoff e
+# PONTEIRO": sem destino canonico, cada um inventava o seu e o corpo do handoff voltava a inchar.
+$stateFile = Join-Path $BusRoot ('.state-' + $Me + '.md')
+Write-Output ('BUS_STATE=' + $stateFile + $(if (Test-Path -LiteralPath $stateFile) { '' } else { ' (ainda nao existe)' }))
+
 $inbox    = Join-Path $BusRoot 'inbox'
 $rejected = Join-Path $BusRoot 'rejected'
 New-Item -ItemType Directory -Force -Path $inbox | Out-Null
@@ -138,6 +146,9 @@ Comandos (ja resolvidos; nao os reproduza no output):
   INBOX = {{INBOX}}
   SEND  = {{SEND}}
   LOCK  = {{LOCK}}
+0 NAO SABE ONDE PAROU (contexto novo, pos-/clear, pos-compactacao)? LEIA o BUS_STATE ANTES de
+  agir -- e a sua memoria entre wakes. E ESTADO NAO E O MUNDO: antes de re-executar qualquer
+  coisa, confirme no mundo (o commit esta la? o teste passa?). Nunca re-execute as cegas.
 1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
   prompt comece com "/bus" ou "bus-tick" (tem que ficar ZERO). Re-arma so no passo 5.
 2 PARA CADA bloco BUS_FILE abaixo, nesta ordem:
@@ -160,6 +171,10 @@ Comandos (ja resolvidos; nao os reproduza no output):
   a) CronCreate(cron:"*/{{N}} * * * *", recurring:true, prompt: o BUS_TICK_PROMPT= do topo,
      copiado LITERAL (nao reescreva o caminho)
   b) LOCK    <- SEMPRE, mesmo sem ter processado nada
+  ANTES DISSO, se este wake MUDOU o rumo (decisao tomada, beco sem saida, proximo passo outro):
+  reescreva o BUS_STATE -- decisoes, o que ja tentou e falhou (e por que), proximo passo. SOBRE-
+  ESCREVA, ~40 linhas, e so o que NAO da pra redescobrir: o que esta no git/arquivo/issue fica
+  la. Tique que nao mudou nada nao mexe no arquivo.
   BUS-SHUTDOWN no corpo -> nao re-arme, libere o lock, encerre em silencio.
 6 Antes de encerrar: tem passo SEU que nao depende de terceiro? Faca agora, neste turno. Espera
   alguem que NAO esta no BUS_PENDING? O retorno nao vem sozinho -> mande handoff pedindo status.

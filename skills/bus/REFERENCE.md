@@ -60,6 +60,38 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## Agente long-lived: o que sobrevive à compactação (v0.9.8)
+
+Especialista do BUS vive dias. A conversa **não** — compactação e `/clear` apagam. Três camadas, e o que decide qual usar é **o que sobrevive a quê**:
+
+| o quê | onde | sobrevive porque |
+|---|---|---|
+| como o BUS funciona (idêntico em todo projeto) | `~/.claude/CLAUDE.md` | é config de sessão, re-estabelecida sempre |
+| política **deste** projeto | `CLAUDE.md` na raiz do projeto | idem, e é herdado pelas subpastas |
+| o que **este especialista** já fez/decidiu | `<projeto>/.state-<slug>.md` | é arquivo; contexto nenhum o alcança |
+
+**A herança foi medida, não presumida.** Duas sessões `claude` reais com marcadores nos dois arquivos:
+
+| sessão rodando em | global | `projects/cl/CLAUDE.md` |
+|---|---|---|
+| `projects/cl/ads` (subpasta de especialista) | ✓ | ✓ **herdado do pai** |
+| `claude-bus` (outra árvore) | ✓ | ✗ |
+
+A primeira linha justifica a camada de projeto: **um** arquivo em `projects/<sigla>/` alcança os N especialistas daquele projeto, porque no layout real cada projeto do BUS é uma pasta e cada especialista trabalha numa subpasta dela (em `cl/`, os diretórios `ads/`, `e2e/`, `social/` batem com os slugs).
+
+A segunda linha é o **modo de falha**: na árvore errada o agente perde a política do projeto **em silêncio** — sem erro, sem aviso, seguindo a política de outro time (ou nenhuma). É a mesma armadilha que o `rules_file` do `/bus-git-watch` já documentava. Por isso o `CLAUDE.md` do projeto **declara** a quem serve (`<!-- BUS: projeto <slug> -->`) e o passo de identidade confere contra o projeto registrado: suposição vira checagem. A conferência fica no `/bus <projeto> <slug>` (uma vez por sessão, onde a skill já está carregada) e não no protocolo, que é pago em todo tique.
+
+**Por que a camada global não foi dissolvida nos projetos:** ela é idêntica nos três. Em três cópias elas divergem, e o sintoma — um time se comportando diferente do outro — é caríssimo de diagnosticar. Duplicar o que é igual é o mesmo erro que o broadcast de handoff.
+
+**`BUS_STATE` (`<projeto>/.state-<slug>.md`)** fecha o que a v0.9.6 deixou aberto: a regra *"self-handoff é PONTEIRO"* não tinha alvo canônico, e sem destino cada especialista inventava o seu — o corpo voltava a inchar. Vive na raiz do projeto (não no scratchpad da sessão, indexado por sid, que o `/clear` orfana — lição que o `/bus-git-watch` já pagou) e é dotfile, então não vira projeto no dashboard.
+
+Três regras impedem que ele degenere:
+- **Atualize quando o rumo MUDA**, não a cada tique — senão todo wake paga escrita à toa.
+- **Sobrescreva, ~40 linhas, só o que não dá pra redescobrir.** Anexar transforma memória em diário, e o diário inteiro é lido em todo wake. O que está no git/arquivo/issue fica lá.
+- **Estado ≠ mundo:** antes de re-executar, confirme no mundo. Arquivo desatualizado obedecido às cegas duplica commit, e-mail e deploy — a mesma regra que o `BUS_STATE_PROCESSING` já impunha na retomada.
+
+**O que NÃO entrou:** a ideia de "o que importa vai no topo do `SKILL.md` porque a truncagem preserva o começo". A prática é boa por outras razões, mas não achei evidência da truncagem — e desde a v0.9.5 o tique **não carrega a skill**, então o caminho quente nem passa por lá. Onde a ordem ainda importa de verdade é na `description` do frontmatter, que é o que decide se a skill é acionada.
+
 ## `BUS_ROLE` e `issue:` — papel derivado, registro durável (v0.9.7)
 
 A ideia original do operador era: *"agente **sem prioridade setada** opera como background, output mínimo, interagindo só com a issue"*. A intuição estava certa; a **chave** estava errada, em dois pontos.
