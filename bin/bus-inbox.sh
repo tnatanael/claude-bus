@@ -42,6 +42,13 @@ Comandos (ja resolvidos; nao os reproduza no output):
 0 NAO SABE ONDE PAROU (contexto novo, pos-/clear, pos-compactacao)? LEIA o BUS_STATE ANTES de
   agir -- e a sua memoria entre wakes. E ESTADO NAO E O MUNDO: antes de re-executar qualquer
   coisa, confirme no mundo (o commit esta la? o teste passa?). Nunca re-execute as cegas.
+0b ESCOPO -- ANTES de executar, releia no CLAUDE.md da raiz do projeto quem e dono de que
+  (secao "Dominios"). Faca SO o que e da sua atribuicao, mesmo que o corpo peca mais, mesmo
+  que voce saiba fazer e mesmo que pareca rapido. Fora do seu escopo (outra especialidade,
+  decisao de produto, requisito ausente ou ambiguo) e GAP: NAO decida e NAO implemente --
+  descreva o GAP num handoff pro BUS_CONTROLLER (se voce E o controlador, e com o operador
+  que voce alinha) e siga com o resto do que e seu. Invadir escopo alheio e o erro mais caro
+  daqui: dois especialistas escrevendo no mesmo lugar, e o dono do assunto nem revisa.
 1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
   prompt comece com "/bus" ou "bus-tick" (tem que ficar ZERO). Re-arma so no passo 5.
 2 PARA CADA bloco BUS_FILE abaixo, nesta ordem:
@@ -84,7 +91,8 @@ EOF
   elif [ "$bus_role" = "controlador" ]; then
     cat <<'EOF'
 PAPEL: CONTROLADOR (menor prioridade do projeto). Voce e a interface com o operador: consolida e
-  reporta. Ainda assim, no maximo 1 linha, sem narrar mecanica.
+  reporta. Ainda assim, no maximo 1 linha, sem narrar mecanica. GAP que chegar dos outros e SEU:
+  alinhe com o operador antes de despachar -- nao resolva no lugar dele.
 EOF
   fi
   echo "BUS_PROTOCOL_END"
@@ -139,6 +147,14 @@ if [ -f "$bus_root/.priority" ]; then
     [ -z "$my_prio" ] && my_prio=1000
     if [ "$my_prio" -le "$min_prio" ]; then bus_role="controlador"; else bus_role="background"; fi
     echo "BUS_ROLE=$bus_role"
+    # QUEM E O CONTROLADOR: destino canonico dos GAPs (ver ESCOPO, passo 0b). Sem esta linha o
+    # especialista teria de ler o .priority pra saber pra quem escalar e, na duvida, decidia
+    # sozinho -- o que o 0b existe pra impedir. So pros BACKGROUND: o controlador nao escala GAP
+    # pra si mesmo, ele alinha com o operador.
+    if [ "$bus_role" = "background" ]; then
+      ctrl=$(awk -F: -v m="$min_prio" '{gsub(/[[:space:]]/,"",$1); v=$2+0; if (NF>=2 && v==m && $1!="") print $1}' "$bus_root/.priority" | sort | head -n1)
+      [ -n "$ctrl" ] && echo "BUS_CONTROLLER=$ctrl"
+    fi
   fi
 fi
 

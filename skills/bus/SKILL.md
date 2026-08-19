@@ -57,6 +57,7 @@ Slug/projeto minúsculos, sem espaço.
    BUS_CRON_INTERVAL=<N>        (arme */N no passo 6)
    BUS_TICK_PROMPT=<frase>      (o prompt do cron, literal — passo 6)
    BUS_ROLE=controlador|background   (§4; ausente = projeto sem controlador)
+   BUS_CONTROLLER=<slug>        pra quem escalar GAP (§4; só pros background)
    BUS_STATE=<caminho do .state-<slug>.md>   sua memória entre wakes (§ abaixo)
    BUS_SLUG= / BUS_PROJECT=     (guarde: -From e -Project dos retornos)
    BUS_FILE=<caminho absoluto>
@@ -114,6 +115,17 @@ Slug/projeto minúsculos, sem espaço.
 - **Peer-to-peer**, dentro do projeto. **Não assuma frente alheia** (observe/valide e informe). Impasses sobem pro operador.
 - **Output pro operador: o mínimo** — no máximo 1 linha, ou nada. Não narre mecânica. Resumo é sob demanda (e é papel do controlador, se houver).
 - **CONTROLADOR** = o de **menor prioridade** (ex.: `0`): consolida por último, é dono do backlog de macro-tarefas (**despacha a próxima onda assim que os outros esvaziam — ninguém ocioso**) e **declara o FIM** (inbox vazio dos outros ≠ projeto acabado). Sem controlador: cada um consolida a própria frente.
+
+### 🎯 Escopo — releia antes de agir; o que é GAP não é seu
+
+Todo wake produtivo imprime o passo **`0b ESCOPO`** no `BUS_PROTOCOL`: **antes de executar**, releia no `CLAUDE.md` da raiz do projeto a seção **`Domínios — quem é dono de quê`**. Não é cerimônia. O especialista é *long-lived*: depois de algumas dezenas de wakes (compactação, `/clear`, contexto novo) a atribuição é a primeira coisa a evaporar — e o sintoma é o agente resolvendo sozinho o que era de outro, sem ninguém revisar.
+
+A regra tem duas metades:
+
+- **Faça só o que é seu** — mesmo que o corpo do handoff peça mais, mesmo que você saiba fazer, mesmo que pareça rápido.
+- **O resto é GAP** (outra especialidade, decisão de produto, requisito ausente ou ambíguo): **não decida e não implemente**. Descreva o GAP num handoff pro `BUS_CONTROLLER=` (o slug vem no cabeçalho do inbox) e **siga com o resto do que é seu** — GAP não paralisa o turno. Quem alinha GAP com o operador é o controlador; é exatamente pra isso que ele é a interface. Se **você** é o controlador, não vem `BUS_CONTROLLER=`: o alinhamento é seu, com o operador.
+
+⚠️ **Seção `Domínios` vazia = o `0b` não tem o que ler.** Aí cada especialista inventa o próprio recorte e a regra vira decoração. Preencher essa seção no `CLAUDE.md` do projeto é o que faz o `0b` existir de verdade.
 
 ### 🔇 `BUS_ROLE` — quem fala com o operador
 

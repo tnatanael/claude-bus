@@ -111,6 +111,14 @@ if (Test-Path -LiteralPath $prioFile) {
       $myPrio = if ($pr.ContainsKey($Me)) { $pr[$Me] } else { 1000 }
       $busRole = if ($myPrio -le $minPrio) { 'controlador' } else { 'background' }
       Write-Output ('BUS_ROLE=' + $busRole)
+      # QUEM E O CONTROLADOR: destino canonico dos GAPs (ver ESCOPO, passo 0b). Sem esta linha o
+      # especialista teria de ler o .priority pra descobrir pra quem escalar -- e, na duvida,
+      # decidia sozinho, que e exatamente o que o passo 0b existe pra impedir. So sai pros
+      # BACKGROUND: o controlador nao escala GAP pra si mesmo, ele alinha com o operador.
+      if ($busRole -eq 'background') {
+        $ctrl = @($pr.GetEnumerator() | Where-Object { $_.Value -eq $minPrio } | Sort-Object Name)[0]
+        if ($ctrl) { Write-Output ('BUS_CONTROLLER=' + $ctrl.Name) }
+      }
     }
   }
 }
@@ -149,6 +157,13 @@ Comandos (ja resolvidos; nao os reproduza no output):
 0 NAO SABE ONDE PAROU (contexto novo, pos-/clear, pos-compactacao)? LEIA o BUS_STATE ANTES de
   agir -- e a sua memoria entre wakes. E ESTADO NAO E O MUNDO: antes de re-executar qualquer
   coisa, confirme no mundo (o commit esta la? o teste passa?). Nunca re-execute as cegas.
+0b ESCOPO -- ANTES de executar, releia no CLAUDE.md da raiz do projeto quem e dono de que
+  (secao "Dominios"). Faca SO o que e da sua atribuicao, mesmo que o corpo peca mais, mesmo
+  que voce saiba fazer e mesmo que pareca rapido. Fora do seu escopo (outra especialidade,
+  decisao de produto, requisito ausente ou ambiguo) e GAP: NAO decida e NAO implemente --
+  descreva o GAP num handoff pro BUS_CONTROLLER (se voce E o controlador, e com o operador
+  que voce alinha) e siga com o resto do que e seu. Invadir escopo alheio e o erro mais caro
+  daqui: dois especialistas escrevendo no mesmo lugar, e o dono do assunto nem revisa.
 1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
   prompt comece com "/bus" ou "bus-tick" (tem que ficar ZERO). Re-arma so no passo 5.
 2 PARA CADA bloco BUS_FILE abaixo, nesta ordem:
@@ -193,7 +208,8 @@ PAPEL: BACKGROUND (voce nao e o controlador). Trabalhe calado: nada de output pr
   } elseif ($role -eq 'controlador') {
     $roleTxt = @'
 PAPEL: CONTROLADOR (menor prioridade do projeto). Voce e a interface com o operador: consolida e
-  reporta. Ainda assim, no maximo 1 linha, sem narrar mecanica.
+  reporta. Ainda assim, no maximo 1 linha, sem narrar mecanica. GAP que chegar dos outros e SEU:
+  alinhe com o operador antes de despachar -- nao resolva no lugar dele.
 '@
   }
   if ($roleTxt -ne '') { $roleTxt = $roleTxt.TrimEnd() + "`n" }

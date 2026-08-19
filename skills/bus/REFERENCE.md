@@ -60,6 +60,18 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## `0b ESCOPO` — a atribuição é a primeira coisa que o agente esquece (v0.9.14)
+
+**O sintoma veio da operação, não da teoria:** especialistas de vez em quando "começam a fazer coisas que não são deles". Faz sentido — eles são long-lived e o `CLAUDE.md` do projeto entra no contexto **uma vez**, no começo da sessão. Depois de dezenas de wakes, compactações e `/clear`, a atribuição é justamente o que some primeiro: não é repetida em lugar nenhum, enquanto o corpo do handoff — que muitas vezes pede mais do que é dele — chega **fresco** a cada tique. A regra tinha de competir com o texto do handoff no mesmo turno.
+
+**Por isso a regra foi pro protocolo impresso, não pra skill.** O `BUS_PROTOCOL` só sai quando há trabalho, ou seja, exatamente nos ticks que **passam pro LLM** (lock adquirido, bloco no inbox); tique ocioso não paga nada. E ele é a coisa mais recente do contexto no instante em que o agente decide o que fazer. Custo: **634 bytes (~160 tokens) por wake produtivo** — o protocolo foi de ~2,9KB pra 3,5KB.
+
+**As duas metades importam.** Só *"faça o que é seu"* transformaria GAP em paralisia: o agente pararia o turno inteiro esperando alinhamento. Por isso o 0b manda **escalar e seguir** — descreve o GAP num handoff pro controlador e continua com o resto do que é dele.
+
+**`BUS_CONTROLLER=` fecha o buraco entre a regra e a ação.** Sem ele o especialista teria de ler o `.priority` pra descobrir pra quem escalar e, na dúvida, decidiria sozinho — que é exatamente o comportamento que o 0b existe pra impedir. Sai só pros `background`: o controlador não escala GAP pra si mesmo, ele alinha com o operador (e a linha de papel dele passou a dizer isso).
+
+**A dependência que o operador precisa saber:** o 0b manda reler a seção **`Domínios — quem é dono de quê`** do `CLAUDE.md` do projeto. Seção vazia = o passo não tem o que ler e a regra vira decoração, com cada especialista inventando o próprio recorte de novo. O esqueleto da v0.9.8 já tem a seção; **preenchê-la é o que faz o 0b existir.**
+
 ## Slots de lock: de 1 para até 3 (v0.9.9)
 
 O lock era 1 por projeto — **1 especialista trabalhando por vez**. Agora a capacidade é configurável (1..3) em `<projeto>/.bus-slots`, pelo stepper `slots:` do dashboard.
