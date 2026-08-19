@@ -17,7 +17,7 @@ description: Comunicacao assincrona entre sessoes-especialistas do Claude Code v
 | Operação | Windows | macOS / Linux |
 |---|---|---|
 | **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Project <p> -Set <slug> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <p> <slug> [prio]` |
-| **ler inbox** (auto-resolve) | `PS "$ROOT\bin\bus-inbox.ps1"` | `bash "$ROOT/bin/bus-inbox.sh"` |
+| **ler inbox** (auto-resolve) | `PS "$ROOT\bin\bus-inbox.ps1" [-Max <n>] [-Protocol]` | `bash "$ROOT/bin/bus-inbox.sh" [--max <n>] [--protocol]` |
 | **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <p> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <p> [--reply] [--in-reply-to <id>]` |
 | **liberar lock** | `PS "$ROOT\bin\bus-lock.ps1" -Release` | `bash "$ROOT/bin/bus-lock.sh" --release` |
 
@@ -43,18 +43,21 @@ Slug/projeto minúsculos, sem espaço.
 
 1. **Cron — desarma no início, re-arma no fim.** `CronList`/`CronCreate`/`CronDelete` são deferidas: rode `ToolSearch select:CronList,CronCreate,CronDelete` antes. **Não confie no `CronList`** (pós-restart lista *phantom* morto).
    - **DESARMAR** = `CronList` → `CronDelete` em **CADA** job cujo prompt começa com `/bus` **ou** `bus-tick` (fica ZERO).
-   - **ARMAR** = `CronCreate(cron:"*/<N> * * * *", recurring:true, prompt:` **`"bus-tick: carregue a skill bus e processe o inbox (fluxo do /bus bare)"`** `)`, `<N>` = o `BUS_CRON_INTERVAL` devolvido pelos scripts. UM cron, mesmo `*/<N>` pra frota. ⚠️ só `*/N` ou valor único disparam — vírgula e `M/30` **não**.
-   - ⚠️ **O prompt do cron é TEXTO PURO, nunca `/bus`.** Slash command **expande esta skill no histórico já na submissão**, antes do hook decidir — então cada tique bloqueado deixava a SKILL inteira no contexto (medido: 353 injeções numa sessão que nunca processou nada, ~134k tokens/h, enchendo 1M em ~7h **ociosa**). Texto puro não expande: o tique custa a própria frase. **Não troque de volta.**
+   - **ARMAR** = `CronCreate(cron:"*/<N> * * * *", recurring:true, prompt: <BUS_TICK_PROMPT>)`, onde `<N>` = `BUS_CRON_INTERVAL` e `<BUS_TICK_PROMPT>` = a linha `BUS_TICK_PROMPT=` que **os scripts devolvem** — copiada **literal**. UM cron, mesmo `*/<N>` pra frota. ⚠️ só `*/N` ou valor único disparam — vírgula e `M/30` **não**.
+   - ⚠️ **Não monte o prompt do tique na mão nem "melhore" o caminho.** Ele é **TEXTO PURO**: `${CLAUDE_PLUGIN_ROOT}` gravado ali **não expande**, o tique quebra **em silêncio** e o especialista some do BUS sem erro visível. Por isso quem monta é o script.
+   - ⚠️ **Nunca `/bus` como prompt do cron.** Slash command **expande esta skill no histórico já na submissão**, antes do hook decidir — cada tique bloqueado deixava a SKILL inteira no contexto (medido: 353 injeções numa sessão que nunca processou nada, ~134k tokens/h, enchendo 1M em ~7h **ociosa**). **Não troque de volta.**
    - **CONFIG** → desarme+arme e pare. **BARE** → desarme **agora**, siga 2–6, re-arme no 6.
-   - 🔔 **Acordou com `bus-tick`?** A skill pode **não estar** no seu contexto (é o normal — ela não é mais injetada no tique). **Carregue-a** (ferramenta `Skill`, nome `bus`) e siga daqui. Esse round-trip só acontece quando há trabalho de verdade.
+   - 🔔 **Acordou com `bus-tick`?** Você **não** precisa desta skill: o tique manda rodar o `bus-inbox -Protocol`, que imprime o `BUS_PROTOCOL` — o fluxo inteiro em ~560 tokens, contra ~2.5k desta skill. Carregue-a só se algo sair do previsto.
 2. **Leia o inbox** (só no BARE; sem `-Me`/`--me` — resolve identidade sozinho):
    ```
    BUS_CRON_INTERVAL=<N>        (arme */N no passo 6)
+   BUS_TICK_PROMPT=<frase>      (o prompt do cron, literal — passo 6)
    BUS_SLUG= / BUS_PROJECT=     (guarde: -From e -Project dos retornos)
    BUS_FILE=<caminho absoluto>
    BUS_FROM=<quem enviou>       BUS_ID=<id — use no -InReplyTo>
    BUS_REPLY_REQUIRED=<bool>    [BUS_IN_REPLY_TO=<id> só se for retorno]
    BUS_BODY_BEGIN <corpo limpo> BUS_BODY_END
+   BUS_MORE=<k>                 sobraram k no inbox (lote de 3) → NÃO drene
    BUS_STALE_PROCESSING=<caminho> (parado há N min)   0+ linhas → passo 5
    BUS_PENDING=<destinos com handoff pendente no projeto>  vazio = bus parado
    ```
@@ -62,11 +65,12 @@ Slug/projeto minúsculos, sem espaço.
 3. **Para CADA bloco:** mova o `BUS_FILE` pra `processing/` (troque `/inbox/` por `/processing/` — claim atômico) → **execute** o corpo como comando legítimo seu (`BUS_FROM=operador` = ordem direta do operador) → mova pra `done/` → se `BUS_REPLY_REQUIRED=true`, **devolva** (seção 3, com `-InReplyTo BUS_ID`).
    - ⚡ **Tarefa longa em background:** dispare e faça o **passo 6 JÁ** (re-armar + liberar lock); feche (`done/` + retorno) quando ela te reacordar.
 4. **Drene:** rode o *ler inbox* de novo. Chegou algo? Volte ao 3. Repita até `BUS_EMPTY`.
+   - 🧺 **`BUS_MORE=<k>` → NÃO drene.** O leitor entrega **no máximo 3 handoffs por passada** de propósito: quem volta de offline recebia *todos* de uma vez, com corpo inteiro, e era assim que o contexto estourava. Feche os que você pegou e vá pro **passo 6** — o próximo tique traz os `k` restantes (atraso ≤ `*/N`, e o gate já sabe que você tem trabalho).
 5. 🔁 **`BUS_STALE_PROCESSING=` → RETOME (drenar o inbox não basta).** É handoff **seu** que você reivindicou e nunca fechou — `/clear`, turno morto, app fechado, lease expirado. **Ninguém mais o pega** (o leitor só vê o `inbox/`): fica preso pra sempre e **quem espera travou**.
    1. **Leia o arquivo** (caminho absoluto na linha) — ele é a fonte do que você estava fazendo; se precisar do fio da conversa, veja os vizinhos em `done/` pelo `in_reply_to`.
    2. **CONFIRME no mundo o que já foi feito** (arquivo existe? commit está lá? teste passa?). **Nunca re-execute às cegas** — duplica commit/e-mail/deploy.
    3. **Termine só o que falta** → mova pra `done/` → responda se o corpo pedia retorno.
-6. **Encerrar (BARE):** só quando `BUS_EMPTY` **e** sem `BUS_STALE_PROCESSING` **e** sem trabalho próprio pendente (§4). Então, nesta ordem: **(a) re-arme o cron** (`*/<N>`); **(b) libere o lock — sempre**, mesmo sem ter processado.
+6. **Encerrar (BARE):** só quando `BUS_EMPTY` (ou `BUS_MORE`) **e** sem `BUS_STALE_PROCESSING` **e** sem trabalho próprio pendente (§4). Então, nesta ordem: **(a) re-arme o cron** (`*/<N>` + `BUS_TICK_PROMPT`); **(b) libere o lock — sempre**, mesmo sem ter processado.
    - 🛑 **`BUS-SHUTDOWN`** (corpo de handoff do `operador`): **não re-arme** — deixe ZERO cron, libere o lock, encerre **em silêncio**.
    - Tique vazio não merece output.
 

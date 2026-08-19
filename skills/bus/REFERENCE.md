@@ -60,6 +60,24 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## Economia de token: protocolo impresso + lote (v0.9.5)
+
+Com o tique já em texto puro, sobraram dois custos, e os dois foram **medidos** antes de mexer.
+
+**1. A skill recarregada em todo tique produtivo.** O tique mandava *"carregue a skill bus"* — 10.250 bytes (~2.560 tokens) a cada acordada com trabalho. E o caminho de **processar** usa só §2+§3 (~5KB); §Comandos/§Identidade/§Coordenação são de **configuração**, pagos sem serem usados.
+
+Agora o `bus-inbox -Protocol` imprime o bloco `BUS_PROTOCOL`: o fluxo BARE inteiro em **~2.3KB (~560 tokens)**, com os comandos já resolvidos em **caminho absoluto** — o script sabe onde está (`$PSScriptRoot`), e os irmãos ficam ao lado dele tanto no plugin (`bin/`) quanto no install local (`skills/bus/`). Economia de **~2.000 tokens por tique produtivo**. O protocolo só sai **quando há trabalho**: tique sem nada não paga por instrução que ninguém vai executar.
+
+É o mesmo movimento que já tinha funcionado uma vez (o tique deixar de ser `/bus`): **tirar instrução do "sempre injetado" e pôr no "impresso sob demanda"**. A skill continua sendo a fonte pro `/bus <projeto> <slug>` e pro que fugir do previsto — o protocolo termina dizendo isso.
+
+**`BUS_TICK_PROMPT=` — por que o script monta o prompt do cron.** O prompt do cron é **texto puro**: um `${CLAUDE_PLUGIN_ROOT}` gravado ali **não expande**. Se o modelo montasse o caminho na mão e errasse, o tique quebraria **em silêncio** — o especialista some do BUS sem erro visível, que é o pior modo de falha deste sistema. Então `bus-name` e `bus-inbox` devolvem a frase pronta e a skill só manda **copiar literal**. O caminho vai em **aspas simples**: a frase inteira entra dentro do `prompt:` (aspas duplas) do `CronCreate`, e aspas duplas aninhadas quebrariam o JSON. E ela termina com *"se falhar, carregue a skill bus"* — a rede pra plugin movido ou renomeado.
+
+**2. Lote (`-Max`, default 3).** O leitor emitia **todos** os pendentes, corpo inteiro, numa passada. Quem voltava de offline acordava com 6+ handoffs (~3,7k tokens medidos num inbox real) e ainda gerava resposta pra cada um no mesmo contexto — o caminho conhecido pro "Prompt is too long" e pro `/clear`.
+
+Seja honesto sobre o que isso é: **não reduz o total** de tokens para o mesmo volume de trabalho — reduz o **pico**. E o pico é o que dispara compactação (que relê o contexto inteiro) e o `/clear` (que joga tudo fora e reconstrói). Por isso o `BUS_MORE=<k>` vem com uma ordem explícita: **não drene** — feche o lote, re-arme, libere o lock. O resto sai no próximo tique, com atraso de no máximo `*/N`, e o gate já sabe que você tem trabalho (ele varre o `inbox/` por conta própria, independente do lote).
+
+Além do limite o leitor **nem abre** os arquivos excedentes — só conta. Efeito colateral: handoff forjado além do lote só vai pro `rejected/` num tique seguinte.
+
 ## Prioridade órfã: desregistrar não apaga o `.priority` (v0.9.4)
 
 O `<projeto>/.priority` é indexado por **slug**, não por sessão, e isso é **de propósito**: uma sessão que reinicia ganha um `sid` novo e roda `/bus <projeto> <slug>` **sem** o 3º argumento — a prioridade tem que sobreviver, senão o controlador viraria default 1000 a cada `/clear`.

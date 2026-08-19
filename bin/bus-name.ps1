@@ -44,10 +44,19 @@ New-Item -ItemType Directory -Force -Path $seenDir | Out-Null
 $cronInterval = 5
 try { $civ = 0; if ([int]::TryParse((Get-Content -LiteralPath (Join-Path $BusRoot '.bus-cron-interval') -Raw -ErrorAction Stop).Trim(), [ref]$civ) -and $civ -ge 1 -and $civ -le 30) { $cronInterval = $civ } } catch {}
 
+# BUS_TICK_PROMPT: a string EXATA do prompt do cron, montada pelo SCRIPT (nao pelo modelo).
+# O prompt do cron e TEXTO PURO -- se o modelo gravar la um ${CLAUDE_PLUGIN_ROOT} literal, o
+# tique quebra EM SILENCIO e o especialista some do BUS sem erro visivel. Aspas SIMPLES no
+# caminho porque isto entra dentro do prompt (aspas duplas) do CronCreate.
+$PSCMD = 'powershell -NoProfile -ExecutionPolicy Bypass -File'
+$tickPrompt = 'bus-tick: rode ' + $PSCMD + " '" + (Join-Path $PSScriptRoot 'bus-inbox.ps1') +
+              "' -Protocol e siga o BUS_PROTOCOL da saida; se falhar, carregue a skill bus"
+
 function Emit([string]$proj, [string]$slug) {
   Write-Output ('PROJECT=' + $proj)
   Write-Output ('SLUG=' + $slug)
   Write-Output ('BUS_CRON_INTERVAL=' + $cronInterval)
+  Write-Output ('BUS_TICK_PROMPT=' + $tickPrompt)
 }
 
 # TRAVA ANTI-INVERSAO: a ordem do comando e /bus <PROJETO> <slug> (v0.7.0; era o inverso ate a

@@ -25,7 +25,11 @@ date +%s > "$seen_dir/$sid"
 cron_interval=5
 civ="$(cat "$bus_root/.bus-cron-interval" 2>/dev/null | tr -dc '0-9')"
 [ -n "$civ" ] && [ "$civ" -ge 1 ] 2>/dev/null && [ "$civ" -le 30 ] 2>/dev/null && cron_interval="$civ"
-emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_INTERVAL=$cron_interval"; }
+# BUS_TICK_PROMPT: string EXATA do prompt do cron, montada pelo SCRIPT. O prompt do cron e
+# texto puro (nao expande variavel) -- caminho montado pelo modelo quebra o tique em silencio.
+selfdir="$(cd "$(dirname "$0")" && pwd)"
+tick_prompt="bus-tick: rode bash '$selfdir/bus-inbox.sh' --protocol e siga o BUS_PROTOCOL da saida; se falhar, carregue a skill bus"
+emit() { echo "PROJECT=$1"; echo "SLUG=$2"; echo "BUS_CRON_INTERVAL=$cron_interval"; echo "BUS_TICK_PROMPT=$tick_prompt"; }
 
 # TRAVA ANTI-INVERSAO (ver cabecalho): o slug informado ja e um PROJETO e o projeto informado
 # nao existe -> quase certamente teclaram a ordem antiga. Nao grava; devolve INVERTED.
