@@ -130,6 +130,9 @@ function readHandoffs(folder, root) {
       from: header.from || fromName.from,
       to: header.to || fromName.to,
       replyRequired: String(header.reply_required).toLowerCase() === 'true',
+      // kind ausente = task (handoff anterior ao fyi). fyi NAO acorda o destino: fica no inbox
+      // ate ele acordar por outro motivo. Sem marca propria, o card pareceria parado sem razao.
+      fyi: String(header.kind).toLowerCase() === 'fyi',
       inReplyTo: header.in_reply_to || '',
     });
   }
@@ -180,6 +183,7 @@ function readAllForThread(root) {
           from: header.from || fromName.from,
           to: header.to || fromName.to,
           replyRequired: String(header.reply_required).toLowerCase() === 'true',
+          fyi: String(header.kind).toLowerCase() === 'fyi',
           inReplyTo: header.in_reply_to || '',
         };
         cache.set(f, meta);

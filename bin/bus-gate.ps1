@@ -287,10 +287,19 @@ try {
       if (((Get-Date) - $pc.LastWriteTime).TotalMinutes -ge 30) { $myPending = $true; break }
     }
   } catch {}
+  # FYI (kind: fyi) NAO acorda ninguem: nao conta como trabalho pendente NEM na cessao de vez por
+  # prioridade -- se contasse, um fyi pendente pra alguem de prioridade maior faria todo mundo
+  # ceder a vez pra um fantasma que nunca vai acordar. Ele fica no inbox e sai de carona no
+  # proximo wake real do destino, que e justamente quando a informacao ainda serve (so acordado
+  # ele FAZ alguma coisa). ENVELHECE: passado FYI_WAKE_MIN volta a valer como trabalho -- senao
+  # um fyi pra quem ficou ocioso nunca seria entregue e o remetente acharia que avisou. No pior
+  # caso e 1 wake a cada 4h, que entrega TODOS os fyi acumulados de uma vez.
+  $FYI_WAKE_MIN = 240
   if (Test-Path -LiteralPath $inbox) {
     foreach ($c in (Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like 'to-*' })) {
       $txt = Get-Content -LiteralPath $c.FullName -Raw -ErrorAction SilentlyContinue
       if (-not ($txt -and ($txt -match '###BUS-END'))) { continue }
+      if (($txt -match '(?m)^kind:\s*fyi\s*$') -and (((Get-Date) - $c.LastWriteTime).TotalMinutes -lt $FYI_WAKE_MIN)) { continue }
       $toSlug = if ($c.Name -match '^to-(.+?)__') { $matches[1] } else { '' }
       if ($toSlug -eq $slug) { $myPending = $true }
       elseif ($toSlug -ne '') {

@@ -4,7 +4,7 @@
 # de auth. NAO TESTADO no Unix ainda -- validar.
 set -u
 base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
-to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""
+to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""; kind="task"
 while [ $# -gt 0 ]; do
   case "$1" in
     --to) to="$2"; shift 2;;
@@ -12,12 +12,20 @@ while [ $# -gt 0 ]; do
     --body) body="$2"; shift 2;;
     --body-file) bodyfile="$2"; shift 2;;
     --reply) reply="true"; shift;;
+    --fyi) kind="fyi"; shift;;
     --in-reply-to) inreply="$2"; shift 2;;
     --project) project="$2"; shift 2;;
     --bus-root) bus_root="$2"; shift 2;;
     *) shift;;
   esac
 done
+# --fyi: handoff que NAO acorda o destino. Fica no inbox e vai de carona no proximo wake real
+# dele -- que e quando a informacao ainda serve, porque so ai ele vai FAZER alguma coisa.
+# Marcacao: tem algo a FAZER por causa disto? task. E so pra SABER? fyi. Na duvida, task.
+if [ "$kind" = "fyi" ] && [ "$reply" = "true" ]; then
+  echo "FYI_COM_REPLY: --fyi e --reply se contradizem (fyi nao acorda ninguem, a resposta nunca vem). Escolha um." >&2
+  exit 1
+fi
 # Raiz: --bus-root explicito vence; senao base + projeto (subpasta, exceto 'default').
 if [ -z "$bus_root" ]; then
   if [ -n "$project" ] && [ "$project" != "default" ]; then bus_root="$base/$project"; else bus_root="$base"; fi
@@ -51,6 +59,7 @@ tmp="$final.tmp"
   printf 'to: %s\n' "$to"
   printf 'auth: %s\n' "$secret"
   printf 'reply_required: %s\n' "$reply"
+  printf 'kind: %s\n' "$kind"
   printf 'in_reply_to: %s\n' "$inreply"
   printf -- '---\n'
   printf '%s\n' "$body"
@@ -60,3 +69,13 @@ mv "$tmp" "$final"   # rename atomico no mesmo filesystem
 
 echo "SENT=$final"
 echo "ID=$id"
+
+# AVISO DE CORPO INFLADO (nao bloqueia -- recusar jogaria fora trabalho ja feito). O valor e o
+# laco de feedback DENTRO da sessao. Medido: self-handoff com 1835 bytes de media cujo corpo
+# dizia "checkpoint em <arquivo>, leia dali" -- descrevendo um arquivo que ia ser aberto igual.
+body_len=$(printf '%s' "$body" | wc -c | tr -d ' ')
+if [ "$to" = "$from" ] && [ "$body_len" -gt 800 ]; then
+  echo "BUS_BODY_WARN=self-handoff com $body_len bytes. Self-handoff e PONTEIRO: onde esta o checkpoint, qual o proximo passo, o que NAO refazer. O conteudo mora no arquivo de checkpoint."
+elif [ "$body_len" -gt 4096 ]; then
+  echo "BUS_BODY_WARN=corpo com $body_len bytes. Um spec completo pode passar disso; conteudo colado de arquivo/commit/issue, nao -- mande o caminho e o que olhar la."
+fi

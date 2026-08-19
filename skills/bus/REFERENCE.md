@@ -60,6 +60,38 @@ Sem filtro, o `list` mostrava os agendamentos de **todos** os projetos e o `remo
 - Sem `-Project` os dois voltam a ser globais: é o modo do **operador**, pra auditar a máquina inteira.
 - Agendamento antigo cujo `meta` não tem `project=` não casa com nenhum filtro → aparece só no `list` global (some da visão do especialista, mas não do radar do operador).
 
+## `kind: fyi` — separar **acordar** de **entregar** (v0.9.6)
+
+Até aqui todo handoff era gatilho de wake, e **o wake é a unidade cara**: protocolo + corpo + o turno inteiro do modelo + re-arme do cron + release do lock. Um "terminei X" custava tudo isso pra não gerar ação nenhuma.
+
+Amostra de 180 handoffs / 446KB do BUS real: **18 cópias extras de broadcast** (o mesmo corpo do controlador replicado pra 3 especialistas) e, na leitura à mão, entre 1/3 e 1/2 do tráfego não-self era anúncio ou status.
+
+`--fyi` grava `kind: fyi`. O gate **ignora** FYI ao decidir se acorda alguém; o leitor entrega o FYI **de carona** no próximo wake real do destino.
+
+**Por que a carona é semanticamente certa, não só barata:** um aviso só importa quando o destinatário vai *fazer* algo — e ele só faz algo quando acorda. Acordando, recebe o aviso junto. O *"heads-up: a pilha cresceu de 7 pra 8"* chega imediatamente antes do push, que é quando ainda serve. Um FYI que acordasse uma sessão ociosa só faria ela ler e voltar a dormir.
+
+**Os três pontos onde isso quebraria se feito pela metade:**
+
+- **Prioridade.** FYI não pode contar no `higherPending`, senão um aviso pendente pra alguém de prioridade maior faz o projeto inteiro ceder a vez pra um fantasma que nunca vai acordar. Deadlock.
+- **`BUS_PENDING`.** A doutrina do "fio vivo" diz: *se quem eu espero está no `BUS_PENDING`, posso encerrar — ele acorda e age*. Com FYI contando ali, eu encerraria esperando alguém que **não vai acordar**. Por isso `BUS_PENDING` passou a listar só quem tem **task** (ou FYI vencido) — e o número do envelhecimento tem que ser **o mesmo** no gate e no leitor.
+- **Envelhecimento (4h).** Sem ele, um FYI pra quem ficou ocioso nunca é entregue e o remetente acha que avisou. Passado o prazo o FYI volta a valer como trabalho: no pior caso é **1 wake a cada 4h**, que entrega todos os acumulados de uma vez. O BUS já tem cicatriz de "handoff preso pra sempre" (foi o que originou o `BUS_STALE_PROCESSING`); não valia a pena abrir uma segunda.
+
+**A borda afiada da marcação:** *destravar alguém é TASK*. "Gate saiu, pode pushar" parece anúncio e é gatilho de ação. A regra é "o outro tem algo a **fazer**?", não "isso é importante?". E a assimetria é proposital: task errada custa um wake, FYI errada custa atraso — por isso **na dúvida, task**.
+
+FYI tem **orçamento próprio** no leitor (5), fora do lote de 3 tasks: senão três avisos empurrariam um pedido de verdade pro tique seguinte. Como consequência o leitor voltou a **abrir todo arquivo** do inbox (a v0.9.5 pulava a leitura além do lote): sem abrir não dá pra saber se é task ou fyi. São ~2KB por arquivo — aqui o caro é token, não I/O.
+
+**Broadcast nativo (`-To a,b,c`) ficou de fora** de propósito: o remetente já escreve o corpo uma vez e só repete a chamada, então economiza pouco. O ganho estava todo em não acordar N sessões, e `--fyi` entrega isso inteiro.
+
+## Corpo do handoff: onde o desperdício realmente estava (v0.9.6)
+
+O diagnóstico genérico ("corpos longos demais") estava **errado**, e cortar por tamanho brigaria com uma otimização correta que já está na skill: *junte 2-3 pedidos num handoff só*, porque round-trip é mais caro que texto. O p50 de 2,3KB é razoável **para um spec**.
+
+O desperdício era específico: **self-handoff**, média de **1.835 bytes**, cujo próprio corpo dizia *"Checkpoint em `<arquivo>`. **Leia dali**"* — 1,8KB descrevendo um arquivo que o modelo ia abrir de qualquer jeito. Num único dia, um especialista mandou **11 seguidos**.
+
+Daí as duas regras: **self-handoff é ponteiro** (onde está o checkpoint, próximo passo, o que não refazer) e **nunca cole o que já está em arquivo/commit/issue** (mande o caminho).
+
+O mecanismo é **um aviso, não um bloqueio**: `BUS_BODY_WARN=` acima de 800 B em self-handoff, ou 4KB em qualquer handoff. Recusar o envio jogaria fora trabalho já feito — e o aviso chega depois do envio, então seu valor é o **laço de feedback dentro da própria sessão**: quem manda 11 self-handoffs em sequência corrige do segundo em diante.
+
 ## Economia de token: protocolo impresso + lote (v0.9.5)
 
 Com o tique já em texto puro, sobraram dois custos, e os dois foram **medidos** antes de mexer.

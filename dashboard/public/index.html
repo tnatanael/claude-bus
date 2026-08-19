@@ -285,6 +285,8 @@
   .handoff .route .prio.low { color: #6ea8fe; background: rgba(110,168,254,.14); border: 1px solid rgba(110,168,254,.35); }
   .handoff .route .prio.high { color: var(--amber); background: rgba(210,153,34,.16); border: 1px solid rgba(210,153,34,.4); }
   .handoff .route .prio.def { color: var(--grey); background: rgba(255,255,255,.04); border: 1px solid var(--border); }
+  /* fyi: nao acorda ninguem, entra de carona -- fica discreto, nao compete com o pendente real */
+  .handoff .route .fyi { font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 6px; margin-left: 3px; align-self: center; color: var(--grey); background: rgba(255,255,255,.03); border: 1px dashed var(--border); }
   /* destino sem registro no projeto: nao tem prioridade -- e o handoff nao tem quem leia */
   .handoff .route .prio.ghost { color: var(--red); background: rgba(248,81,73,.12); border: 1px dashed rgba(248,81,73,.45); }
   .handoff .id {
@@ -603,7 +605,9 @@ function handoffCard(it, idSet, proj, cancelable) {
   // vai voltar pra ler. Antes passava despercebido (sem ✕, e ainda com badge de prioridade
   // vinda de linha órfã no .priority), então o card parecia normal.
   const destGhost = (it.toRegistered === false);
-  const destOffline = (it.tick && it.toArmed === false);
+  // FYI nao acorda o destino de proposito: fica no inbox ate ele acordar por outro motivo (ou
+  // envelhecer 4h). Entao o X de "destino offline" NAO se aplica -- nao ha nada travado.
+  const destOffline = (it.tick && it.toArmed === false && !it.fyi);
   const offlineX = (it.tick && (destOffline || destGhost))
     ? `<span class="dest-offline" title="${destGhost
         ? `destino ${esc(it.to)} NÃO ESTÁ REGISTRADO no BUS deste projeto — ninguém vai ler este handoff; registre a sessão com /bus <projeto> ${esc(it.to)} ou cancele o card`
@@ -613,6 +617,7 @@ function handoffCard(it, idSet, proj, cancelable) {
   const tp = (it.toPrio == null ? 1000 : it.toPrio);
   const prioCls = tp < 1000 ? "low" : (tp > 1000 ? "high" : "def");
   const prioArrow = tp < 1000 ? "↓" : (tp > 1000 ? "↑" : "");
+  const fyiTag = it.fyi ? `<span class="fyi" title="FYI — não acorda o destino: entra de carona no próximo wake real dele (ou em 4h, se ele ficar ocioso). Não pede ação nem resposta.">fyi</span>` : "";
   const prioTag = destGhost
     ? `<span class="prio ghost" title="${esc(it.to)} não está registrado no BUS deste projeto — não tem prioridade (a prioridade é do especialista, não do nome)">sem registro</span>`
     : `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
@@ -622,7 +627,7 @@ function handoffCard(it, idSet, proj, cancelable) {
       <div class="route">
         <span class="from">${esc(it.from)}</span>
         <span class="ar">→</span>
-        <span class="to">${esc(it.to)}</span>${prioTag}
+        <span class="to">${esc(it.to)}</span>${prioTag}${fyiTag}
       </div>
       <div class="id">${esc(it.id)}</div>
       <div class="tags">${replyTag}${linkTag}${etaTag}</div>
@@ -1007,7 +1012,7 @@ function render(state) {
   // a ORDEM (prioridade + espera) entra na assinatura -> re-ordena se a prioridade mudar.
   const inboxOrder = sortInboxByWait(h.inbox || []).map(it => it.id).join(",");
   const sig = "ONE|" + (state.project || "") + "|IB:" + inboxOrder + "|" + JSON.stringify(["inbox", "processing", "rejected"].map(k =>
-    (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}|${it.toStatus || ""}|${it.toPrio == null ? "" : it.toPrio}`)));
+    (h[k] || []).map(it => `${it.id}|${it.inReplyTo}|${it.replyRequired ? 1 : 0}|${it.fyi ? 1 : 0}|${it.toStatus || ""}|${it.toPrio == null ? "" : it.toPrio}`)));
   if (sig !== lastHandoffSig) {
     lastHandoffSig = sig;
     renderHandoffs(h, state.project);

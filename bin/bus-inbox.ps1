@@ -122,6 +122,8 @@ Comandos (ja resolvidos; nao os reproduza no output):
   d) so se BUS_REPLY_REQUIRED=true, devolva (corpo num arquivo pela ferramenta Write -- acento
      nao sobrevive ao shell):
      SEND -To <BUS_FROM> -From <BUS_SLUG> -Project <BUS_PROJECT> -BodyFile <arq> -InReplyTo <BUS_ID>
+  BLOCO COM BUS_KIND=fyi: e so informacao. NAO executa, NAO responde -- leia e mova pra \done\.
+  Ele nao te acordou; veio de carona neste wake.
 3 DRENE: rode INBOX de novo (sem -Protocol); veio bloco novo -> volte ao 2; ate BUS_EMPTY.
   EXCECAO: saiu BUS_MORE=<k> -> NAO drene, pule pro 5. O proximo tique pega o resto.
 4 BUS_STALE_PROCESSING= e trabalho SEU preso (turno morto, /clear, lease vencido) e NINGUEM
@@ -147,10 +149,15 @@ $hits = Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue |
 # LOTE (-Max, default 3): quem volta de offline tinha TODOS os pendentes despejados de uma vez,
 # corpo inteiro em cada um -- e era assim que o contexto estourava e sobrava /clear pro operador.
 # Alem do limite so CONTO os arquivos (nem leio): o resto sai no proximo tique.
-$blocks = New-Object System.Collections.Generic.List[string]
-$found = 0; $more = 0
+# FYI (kind: fyi) tem ORCAMENTO PROPRIO: nao consome o lote de tasks, senao 3 avisos empurrariam
+# um pedido de verdade pro proximo tique. Por isso o arquivo agora e SEMPRE lido (antes eu pulava
+# a leitura alem do lote): sem abrir, nao da pra saber se e task ou fyi, e um lote cheio de fyi
+# deixaria a task pra tras. E leitura de ~2KB por arquivo -- o que custa caro aqui e token, nao I/O.
+$MaxFyi = 5
+$blocks    = New-Object System.Collections.Generic.List[string]
+$fyiBlocks = New-Object System.Collections.Generic.List[string]
+$found = 0; $more = 0; $fyiFound = 0; $fyiMore = 0
 foreach ($hit in $hits) {
-  if ($found -ge $Max) { $more++; continue }
   $raw = Get-Content -LiteralPath $hit.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
   # O end tag confirma que a escrita atomica terminou (nao pega arquivo a meio caminho).
   if (-not ($raw -and ($raw -match '###BUS-END'))) { continue }
@@ -165,21 +172,28 @@ foreach ($hit in $hits) {
   # Entrega SO o que o modelo precisa: quem enviou (from), o id (p/ -InReplyTo), se pede
   # retorno, e o CORPO ja limpo. Descarta auth (token/ruido), o "to" (e voce) e os
   # marcadores ###BUS-START/END -> menos tokens de contexto por leitura, parsing trivial.
+  # Sem 'kind:' = task (handoff antigo, anterior ao fyi -- default seguro: acorda).
+  $isFyi = ($header -match '(?m)^kind:\s*fyi\s*$')
+  if ($isFyi) { if ($fyiFound -ge $MaxFyi) { $fyiMore++; continue } }
+  else        { if ($found    -ge $Max)    { $more++;    continue } }
   $hFrom = if ($header -match '(?m)^from:\s*(\S+)') { $matches[1] } else { '' }
   $hId   = if ($header -match '(?m)^id:\s*(\S+)') { $matches[1] } else { '' }
   $hRR   = if ($header -match '(?m)^reply_required:\s*(\S+)') { $matches[1] } else { 'false' }
   $hIRT  = if ($header -match '(?m)^in_reply_to:\s*(\S+)') { $matches[1] } else { '' }
   $body  = if ($split.Count -gt 1) { $split[1] } else { '' }
   $body  = ($body -replace '(?m)^\s*###BUS-END\s*$', '').Trim()
-  $found++
-  $blocks.Add('BUS_FILE=' + $hit.FullName) | Out-Null
-  $blocks.Add('BUS_FROM=' + $hFrom) | Out-Null
-  $blocks.Add('BUS_ID=' + $hId) | Out-Null
-  $blocks.Add('BUS_REPLY_REQUIRED=' + $hRR) | Out-Null
-  if ($hIRT) { $blocks.Add('BUS_IN_REPLY_TO=' + $hIRT) | Out-Null }
-  $blocks.Add('BUS_BODY_BEGIN') | Out-Null
-  $blocks.Add($body) | Out-Null
-  $blocks.Add('BUS_BODY_END') | Out-Null
+  # Atribuicao DENTRO do ramo, nao "$tgt = if (...) {$lista}": o if como expressao ENUMERA a
+  # colecao, e lista vazia vira $null -- o classico do PowerShell.
+  if ($isFyi) { $tgt = $fyiBlocks; $fyiFound++ } else { $tgt = $blocks; $found++ }
+  $tgt.Add('BUS_FILE=' + $hit.FullName) | Out-Null
+  $tgt.Add('BUS_FROM=' + $hFrom) | Out-Null
+  $tgt.Add('BUS_ID=' + $hId) | Out-Null
+  if ($isFyi) { $tgt.Add('BUS_KIND=fyi') | Out-Null }
+  $tgt.Add('BUS_REPLY_REQUIRED=' + $hRR) | Out-Null
+  if ($hIRT) { $tgt.Add('BUS_IN_REPLY_TO=' + $hIRT) | Out-Null }
+  $tgt.Add('BUS_BODY_BEGIN') | Out-Null
+  $tgt.Add($body) | Out-Null
+  $tgt.Add('BUS_BODY_END') | Out-Null
 }
 # INBOX GERAL do projeto: destinos distintos com handoff pendente (o "olhar o inbox geral, nao
 # so o seu"). So o nome do arquivo (escrita e atomica -> .handoff = completo), barato. VAZIO =
@@ -200,14 +214,28 @@ foreach ($h in (Get-ChildItem -LiteralPath (Join-Path $BusRoot 'processing') -Fi
 
 # EMISSAO (o stale e calculado antes so pra decidir isto): o protocolo vem PRIMEIRO, e so quando
 # ha trabalho de verdade -- tique sem nada nao paga por instrucao que ninguem vai executar.
-if ($Protocol -and ($found -gt 0 -or $stale.Count -gt 0)) { Write-Output (Get-BusProtocol $cronInterval) }
+if ($Protocol -and ($found -gt 0 -or $fyiFound -gt 0 -or $stale.Count -gt 0)) { Write-Output (Get-BusProtocol $cronInterval) }
 foreach ($b in $blocks) { Write-Output $b }
 if ($more -gt 0) { Write-Output ('BUS_MORE=' + $more) }
-if ($found -eq 0) { Write-Output 'BUS_EMPTY' }
+foreach ($b in $fyiBlocks) { Write-Output $b }
+if ($fyiMore -gt 0) { Write-Output ('BUS_MORE_FYI=' + $fyiMore) }
+if (($found + $fyiFound) -eq 0) { Write-Output 'BUS_EMPTY' }
 foreach ($s in $stale) { Write-Output $s }
 
+# BUS_PENDING so lista quem tem trabalho que VAI ACORDAR o destino. Handoff fyi nao acorda
+# ninguem (o gate ignora), entao contar fyi aqui quebraria a doutrina do "fio vivo": eu
+# encerraria achando que quem eu espero vai acordar e agir, e ele nao vai. Fyi VELHO (>=
+# FYI_WAKE_MIN) volta a acordar -- mesma regra do gate, os dois numeros tem que casar.
+$FYI_WAKE_MIN = 240
 $pend = @{}
 foreach ($h in (Get-ChildItem -LiteralPath $inbox -File -Filter 'to-*.handoff' -ErrorAction SilentlyContinue)) {
-  if ($h.Name -match '^to-(.+?)__') { $pend[$matches[1]] = $true }
+  if (-not ($h.Name -match '^to-(.+?)__')) { continue }
+  $d = $matches[1]
+  if ($pend.ContainsKey($d)) { continue }   # ja listado: nao paga leitura de novo
+  if (((Get-Date) - $h.LastWriteTime).TotalMinutes -lt $FYI_WAKE_MIN) {
+    $ht = Get-Content -LiteralPath $h.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($ht -and ($ht -match '(?m)^kind:\s*fyi\s*$')) { continue }
+  }
+  $pend[$d] = $true
 }
 Write-Output ('BUS_PENDING=' + (($pend.Keys | Sort-Object) -join ','))

@@ -48,6 +48,8 @@ Comandos (ja resolvidos; nao os reproduza no output):
   d) so se BUS_REPLY_REQUIRED=true, devolva (corpo num arquivo pela ferramenta Write -- acento
      nao sobrevive ao shell):
      SEND --to <BUS_FROM> --from <BUS_SLUG> --project <BUS_PROJECT> --body-file <arq> --in-reply-to <BUS_ID>
+  BLOCO COM BUS_KIND=fyi: e so informacao. NAO executa, NAO responde -- leia e mova pra /done/.
+  Ele nao te acordou; veio de carona neste wake.
 3 DRENE: rode INBOX de novo (sem --protocol); veio bloco novo -> volte ao 2; ate BUS_EMPTY.
   EXCECAO: saiu BUS_MORE=<k> -> NAO drene, pule pro 5. O proximo tique pega o resto.
 4 BUS_STALE_PROCESSING= e trabalho SEU preso (turno morto, /clear, lease vencido) e NINGUEM
@@ -120,13 +122,17 @@ secret="$(tr -d ' \r\n' < "$secret_file")"
 # LOTE (--max, default 3): quem volta de offline tinha TODOS os pendentes despejados de uma vez,
 # corpo inteiro em cada um -- e era assim que o contexto estourava e sobrava /clear pro operador.
 # Alem do limite so CONTO (nem leio o arquivo): o resto sai no proximo tique.
-found=0; more=0
+# FYI (kind: fyi) tem ORCAMENTO PROPRIO: nao consome o lote de tasks, senao 3 avisos empurrariam
+# um pedido de verdade pro proximo tique. Por isso o arquivo e SEMPRE lido: sem abrir nao da pra
+# saber se e task ou fyi. O que custa caro aqui e token, nao I/O.
+max_fyi=5
+found=0; more=0; fyi_found=0; fyi_more=0
 blocks_file="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/bus-blocks.$$")"
-: > "$blocks_file"
-trap 'rm -f "$blocks_file"' EXIT
+fyi_file="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/bus-fyi.$$")"
+: > "$blocks_file"; : > "$fyi_file"
+trap 'rm -f "$blocks_file" "$fyi_file"' EXIT
 for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   [ -e "$hit" ] || continue
-  if [ "$found" -ge "$max" ]; then more=$((more+1)); continue; fi
   raw="$(cat "$hit" 2>/dev/null)"
   printf '%s' "$raw" | grep -q '###BUS-END' || continue   # escrita ainda em curso
   header="$(printf '%s' "$raw" | sed '/^---[[:space:]]*$/q')"
@@ -143,17 +149,27 @@ for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   # corpo = tudo depois da 1a linha '---', sem a linha ###BUS-END
   body="$(printf '%s\n' "$raw" | sed '1,/^---[[:space:]]*$/d' | sed '/^###BUS-END[[:space:]]*$/d')"
   [ -z "$hrr" ] && hrr="false"
-  found=$((found+1))
+  # Sem 'kind:' = task (handoff antigo, anterior ao fyi -- default seguro: acorda).
+  isfyi=0
+  printf '%s' "$header" | grep -qE '^kind:[[:space:]]*fyi[[:space:]]*$' && isfyi=1
+  if [ "$isfyi" = "1" ]; then
+    [ "$fyi_found" -ge "$max_fyi" ] && { fyi_more=$((fyi_more+1)); continue; }
+    fyi_found=$((fyi_found+1)); out="$fyi_file"
+  else
+    [ "$found" -ge "$max" ] && { more=$((more+1)); continue; }
+    found=$((found+1)); out="$blocks_file"
+  fi
   {
     echo "BUS_FILE=$hit"
     echo "BUS_FROM=$hfrom"
     echo "BUS_ID=$hid"
+    [ "$isfyi" = "1" ] && echo "BUS_KIND=fyi"
     echo "BUS_REPLY_REQUIRED=$hrr"
     [ -n "$hirt" ] && echo "BUS_IN_REPLY_TO=$hirt"
     echo "BUS_BODY_BEGIN"
     printf '%s\n' "$body"
     echo "BUS_BODY_END"
-  } >> "$blocks_file"
+  } >> "$out"
 done
 # INBOX GERAL do projeto: destinos distintos com handoff pendente (o "olhar o inbox geral, nao
 # so o seu"). So o nome do arquivo (escrita atomica). VAZIO = bus parado: se voce termina
@@ -174,17 +190,28 @@ done
 
 # EMISSAO (o stale e apurado antes so pra decidir isto): o protocolo vem PRIMEIRO e SO quando ha
 # trabalho de verdade -- tique sem nada nao paga por instrucao que ninguem vai executar.
-if [ "$protocol" -eq 1 ] && { [ "$found" -gt 0 ] || [ -n "$stale" ]; }; then bus_protocol; fi
+if [ "$protocol" -eq 1 ] && { [ "$found" -gt 0 ] || [ "$fyi_found" -gt 0 ] || [ -n "$stale" ]; }; then bus_protocol; fi
 cat "$blocks_file"
 [ "$more" -gt 0 ] && echo "BUS_MORE=$more"
-[ "$found" -eq 0 ] && echo "BUS_EMPTY"
+cat "$fyi_file"
+[ "$fyi_more" -gt 0 ] && echo "BUS_MORE_FYI=$fyi_more"
+[ $(( found + fyi_found )) -eq 0 ] && echo "BUS_EMPTY"
 [ -n "$stale" ] && printf '%s' "$stale"
 
+# BUS_PENDING so lista quem tem trabalho que VAI ACORDAR o destino. Fyi nao acorda (o gate
+# ignora), e conta-lo aqui quebraria o "fio vivo": eu encerraria achando que quem eu espero vai
+# acordar e agir. Fyi VELHO (>= FYI_WAKE_MIN) volta a acordar -- mesmo numero do gate.
+FYI_WAKE_MIN=240
 pend=""
 for f in "$inbox"/to-*.handoff; do
   [ -e "$f" ] || continue
   bn="$(basename "$f")"; d="${bn#to-}"; d="${d%%__*}"
-  case ",$pend," in *",$d,"*) ;; *) pend="${pend:+$pend,}$d";; esac
+  case ",$pend," in *",$d,"*) continue;; esac      # ja listado: nao paga leitura de novo
+  if grep -qE '^kind:[[:space:]]*fyi[[:space:]]*$' "$f" 2>/dev/null; then
+    fm=$(date -r "$f" +%s 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+    [ $(( (now_s - fm) / 60 )) -lt "$FYI_WAKE_MIN" ] && continue
+  fi
+  pend="${pend:+$pend,}$d"
 done
 echo "BUS_PENDING=$pend"
 exit 0

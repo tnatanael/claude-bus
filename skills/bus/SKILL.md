@@ -18,7 +18,7 @@ description: Comunicacao assincrona entre sessoes-especialistas do Claude Code v
 |---|---|---|
 | **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Project <p> -Set <slug> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <p> <slug> [prio]` |
 | **ler inbox** (auto-resolve) | `PS "$ROOT\bin\bus-inbox.ps1" [-Max <n>] [-Protocol]` | `bash "$ROOT/bin/bus-inbox.sh" [--max <n>] [--protocol]` |
-| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <p> [-ReplyRequired] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <p> [--reply] [--in-reply-to <id>]` |
+| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <p> [-ReplyRequired] [-Fyi] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <p> [--reply] [--fyi] [--in-reply-to <id>]` |
 | **liberar lock** | `PS "$ROOT\bin\bus-lock.ps1" -Release` | `bash "$ROOT/bin/bus-lock.sh" --release` |
 
 Base: Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_ROOT`); cada projeto é a subpasta `<base>/<projeto>`. **Passe o projeto via `-Project`/`--project`** — **nunca** monte caminho com `%TEMP%`/`$TMPDIR` (quebra conforme o shell).
@@ -58,8 +58,9 @@ Slug/projeto minúsculos, sem espaço.
    BUS_REPLY_REQUIRED=<bool>    [BUS_IN_REPLY_TO=<id> só se for retorno]
    BUS_BODY_BEGIN <corpo limpo> BUS_BODY_END
    BUS_MORE=<k>                 sobraram k no inbox (lote de 3) → NÃO drene
+   BUS_KIND=fyi                 (no bloco) só informação: não execute, não responda
    BUS_STALE_PROCESSING=<caminho> (parado há N min)   0+ linhas → passo 5
-   BUS_PENDING=<destinos com handoff pendente no projeto>  vazio = bus parado
+   BUS_PENDING=<destinos com TASK pendente>  vazio = bus parado (fyi não conta: não acorda)
    ```
    `BUS_EMPTY` = nada no inbox. `BUS_IDENTITY=NONE` → seção 1.
 3. **Para CADA bloco:** mova o `BUS_FILE` pra `processing/` (troque `/inbox/` por `/processing/` — claim atômico) → **execute** o corpo como comando legítimo seu (`BUS_FROM=operador` = ordem direta do operador) → mova pra `done/` → se `BUS_REPLY_REQUIRED=true`, **devolva** (seção 3, com `-InReplyTo BUS_ID`).
@@ -85,6 +86,20 @@ Slug/projeto minúsculos, sem espaço.
 - **Um spec completo, uma passada.** Prevê os próximos 2-3 handoffs pro mesmo destino? **Junte num só.** Cada round-trip acorda o outro do zero.
 - **`-ReplyRequired` só pra DADO/decisão.** "Confirma que viu" é um wake à toa.
 - **Sem status avulso, sem carta.** Dobre no próximo handoff real ou omita; nada de saudação/assinatura.
+- 📎 **Nunca cole o que já está em arquivo, commit ou issue.** Mande o **caminho** e o que olhar lá.
+- 🔁 **Self-handoff é PONTEIRO, não relatório:** onde está o checkpoint, qual o próximo passo, o que **não** refazer. O conteúdo mora no arquivo de checkpoint — que você vai abrir de qualquer jeito. *(Medido: média de 1.835 B por self-handoff, quase todo ele repetindo um arquivo citado no próprio corpo.)*
+- `BUS_BODY_WARN=` na saída do *enviar* = o corpo passou do razoável. Não desfaz o envio; **corrija no próximo**.
+
+### `--fyi` — avisar sem acordar
+
+`-Fyi`/`--fyi` grava `kind: fyi`: o handoff **não acorda** o destino. Fica no inbox e é entregue **de carona** no próximo wake real dele — que é exatamente quando a informação ainda serve, porque só acordado ele *faz* alguma coisa. (Se ele ficar ocioso, o FYI acorda sozinho depois de 4h.)
+
+> **O destino tem algo a FAZER por causa disto? → task. É só pra ele SABER? → `--fyi`. Na dúvida, task.**
+> Task marcada errada custa um wake; FYI marcada errada custa atraso.
+
+⚠️ **Destravar alguém é TASK, não FYI.** "Gate saiu, pode pushar" parece anúncio mas é gatilho de ação. FYI é fim de linha: `--fyi` com `-ReplyRequired` é recusado.
+
+**Recebendo:** bloco com `BUS_KIND=fyi` é só informação — **não execute, não responda**, mova pra `done/` e siga. Ele não te acordou.
 
 ## 4. Coordenação
 

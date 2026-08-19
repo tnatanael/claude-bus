@@ -186,12 +186,21 @@ main() {
   myprio="$(getprio "$slug")"
 
   # varre o inbox: eu tenho pendente? e algum especialista de prioridade MAIOR tem?
+  # FYI (kind: fyi) NAO acorda ninguem: nao conta como pendente NEM na cessao de vez por
+  # prioridade (senao um fyi pra alguem de prioridade maior faria todos cederem a vez pra um
+  # fantasma). Sai de carona no proximo wake real do destino. ENVELHECE em FYI_WAKE_MIN, senao
+  # fyi pra quem ficou ocioso nunca seria entregue e o remetente acharia que avisou.
+  FYI_WAKE_MIN=240
   inbox="$projroot/inbox"
   mypending=0; higherpending=0; higherslug=""
   if [ -d "$inbox" ]; then
     for f in "$inbox"/to-*.handoff; do
       [ -e "$f" ] || continue
       grep -q '###BUS-END' "$f" 2>/dev/null || continue
+      if grep -qE '^kind:[[:space:]]*fyi[[:space:]]*$' "$f" 2>/dev/null; then
+        fm=$(date -r "$f" +%s 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+        [ $(( (now - fm) / 60 )) -lt "$FYI_WAKE_MIN" ] && continue
+      fi
       bn="$(basename "$f")"; toslug="${bn#to-}"; toslug="${toslug%%__*}"   # entre 'to-' e o 1o '__'
       if [ "$toslug" = "$slug" ]; then mypending=1
       elif [ -n "$toslug" ]; then

@@ -16,10 +16,20 @@ param(
   [string]$Body = '',
   [string]$BodyFile = '',
   [switch]$ReplyRequired,
+  [switch]$Fyi,
   [string]$InReplyTo = '',
   [string]$Project = '',
   [string]$BusRoot = ''
 )
+# -Fyi: handoff que NAO acorda o destino (kind: fyi). Fica no inbox e e entregue de carona no
+# proximo wake real dele -- que e exatamente quando a informacao ainda serve, porque so ai ele
+# vai FAZER alguma coisa. Regra de marcacao: se o outro tem algo a FAZER por causa disto, e
+# task; se e so pra ele SABER, e fyi; na duvida, task (task errada custa um wake, fyi errada
+# custa atraso). Destravar alguem ("pode pushar") e TASK, nao fyi.
+if ($Fyi -and $ReplyRequired) {
+  Write-Error 'FYI_COM_REPLY: -Fyi e -ReplyRequired se contradizem (fyi nao acorda ninguem, entao a resposta nunca vem). Escolha um.'
+  exit 1
+}
 # Raiz do projeto resolvida AQUI (-Project), pra o agente nunca montar caminho com
 # %TEMP%/$env:TEMP (quebra via Bash). -BusRoot explicito vence.
 if ($BusRoot -eq '') {
@@ -61,6 +71,8 @@ $name  = 'to-' + $To + '__from-' + $From + '__' + $id + '.handoff'
 $final = Join-Path $inbox $name
 $tmp   = $final + '.tmp'
 
+$kind  = if ($Fyi) { 'fyi' } else { 'task' }
+
 $lines = @(
   '###BUS-START'
   'id: '             + $id
@@ -68,6 +80,7 @@ $lines = @(
   'to: '             + $To
   'auth: '           + $secret
   'reply_required: ' + $rr
+  'kind: '           + $kind
   'in_reply_to: '    + $InReplyTo
   '---'
   $Body
@@ -81,3 +94,14 @@ Move-Item -LiteralPath $tmp -Destination $final       # atomic rename on same vo
 
 Write-Output ('SENT=' + $final)
 Write-Output ('ID=' + $id)
+
+# AVISO DE CORPO INFLADO (nao bloqueia -- recusar aqui jogaria fora trabalho ja feito). O valor
+# e o laco de feedback DENTRO da sessao: quem manda 11 self-handoffs seguidos corrige do 2o em
+# diante. Medido: self-handoff com media de 1835 bytes cujo proprio corpo dizia "checkpoint em
+# <arquivo>, leia dali" -- 1,8KB descrevendo um arquivo que o modelo ia abrir de qualquer jeito.
+$bodyLen = [System.Text.Encoding]::UTF8.GetByteCount($Body)
+if ($To -eq $From -and $bodyLen -gt 800) {
+  Write-Output ('BUS_BODY_WARN=self-handoff com ' + $bodyLen + ' bytes. Self-handoff e PONTEIRO: onde esta o checkpoint, qual o proximo passo, o que NAO refazer. O conteudo mora no arquivo de checkpoint.')
+} elseif ($bodyLen -gt 4096) {
+  Write-Output ('BUS_BODY_WARN=corpo com ' + $bodyLen + ' bytes. Um spec completo pode passar disso; conteudo colado de arquivo/commit/issue, nao -- mande o caminho e o que olhar la.')
+}
