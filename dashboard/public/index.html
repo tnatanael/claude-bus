@@ -388,6 +388,10 @@
    corte fica no .lk-text, não na barra: overflow:hidden na barra clipava o balão do "!". */
 .lockbar { display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: min(50vw, 720px); margin: 0 2px; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: nowrap; line-height: 1.35; }
 .lockbar .lk-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* O grupo é quem encolhe pelo cabeçalho; dentro dele, só a lockbar cede (os slots são botões,
+   cortá-los quebraria o clique). Daí min-width:0 nos dois níveis. */
+.lock-group { display: inline-flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.lock-group #slotCfg { flex: 0 0 auto; }
 /* Janela estreita: quem sai é INFORMATIVO (caminho do bus root, relógio) -- nunca os botões e
    nunca a lockbar inteira. Sem isto, "uma linha só" viraria scroll horizontal, que é pior que
    a quebra que o operador reclamou. O bus root continua no title do próprio elemento. */
@@ -442,10 +446,15 @@
 <header>
   <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco, com duas exceções, ambas por clique explícito seu: <b>Pausar</b> (liga/desliga o marcador de pausa do projeto) e <b>Desativar</b> (enfileira um handoff de encerramento pra cada especialista ativo do projeto). Nunca move nem apaga handoff existente. Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span></h1>
   <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button><button id="offBtn" class="offbtn" style="display:none" title="Encerra o BUS deste projeto: manda cada especialista ATIVO (verde) desarmar o cron e parar. Quem já está offline não recebe nada.">⏻</button></span>
-  <div id="lockbar" class="lockbar free">🔓 lock livre</div>
+  <!-- Lock + slots são a MESMA informação (quem está trabalhando / quantos cabem), então andam
+       juntos. O rótulo "slots:" saiu: os 3 quadradinhos ao lado do lock já se explicam, e o que
+       cada cor quer dizer está no title. -->
+  <span class="lock-group">
+    <div id="lockbar" class="lockbar free">🔓 lock livre</div>
+    <span class="cron-cfg" id="slotCfg" style="display:none" title="Quantos especialistas deste projeto trabalham AO MESMO TEMPO. cinza = desabilitado · verde = livre · âmbar = ocupado. Cuidado: com mais de 1, dois especialistas podem mexer no mesmo repo ao mesmo tempo — e cada slot é uma sessão consumindo a máquina."><span id="slotBtns"></span></span>
+  </span>
   <div class="meta">
     <span class="cron-cfg" title="Intervalo do auto-recheck (cron */N min, 1–30). Grava no BUS; cada especialista pega no próximo /bus (~1 ciclo, não é instantâneo).">check: <button class="cron-step" id="cronDec" type="button">−</button><b id="cronVal">5</b>m<button class="cron-step" id="cronInc" type="button">+</button></span>
-    <span class="cron-cfg" id="slotCfg" style="display:none" title="Quantos especialistas deste projeto trabalham AO MESMO TEMPO. cinza = desabilitado · verde = livre · âmbar = ocupado. Cuidado: com mais de 1, dois especialistas podem mexer no mesmo repo ao mesmo tempo — e cada slot é uma sessão consumindo a máquina.">slots: <span id="slotBtns"></span></span>
     <span class="meta-root">bus root: <b id="busRoot">…</b></span>
     <span class="meta-now">now: <b id="now">…</b></span>
     <span class="src" id="src">…</span>
