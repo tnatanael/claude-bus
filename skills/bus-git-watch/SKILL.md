@@ -1,13 +1,13 @@
 ---
 name: bus-git-watch
-description: Vigia as issues de um repositório GitHub e converte CADA evento (issue nova, comentário, fechamento) em handoff do BUS para o especialista dono do assunto. Arma a vigia que só acorda a sessão quando algo muda (monitor de fundo em sessão própria; cron se dividir a sessão com um especialista do BUS). Invoque com /bus-git-watch [owner/repo]. Complementa o /bus: o BUS move o trabalho, o GitHub guarda o histórico e o backlog.
+description: Vigia as issues de um repositório GitHub e converte CADA evento (issue nova, comentário, fechamento) em handoff do BUS para o especialista dono do assunto. A vigia é um cron de hora em hora rodando UMA passada do git-watch-tick.sh (tarefa de fundo pendurada impede o tique do BUS de chegar na sessão); snapshot-diff contínuo só fora de uma sessão do BUS, quando precisar de reação imediata. Invoque com /bus-git-watch [owner/repo]. Complementa o /bus: o BUS move o trabalho, o GitHub guarda o histórico e o backlog.
 ---
 
 # /bus-git-watch — issues do GitHub → handoffs do BUS
 
 Você é o **carteiro entre o GitHub e o BUS**. Duas montagens possíveis, e a escolha muda o passo 4: **sessão própria** (carteiro externo, write-only — a preferida) ou **dentro da sessão de um especialista já registrado** (tipicamente o **controlador/PO**), que **não pode** segurar monitor de fundo. O ciclo é sempre o mesmo:
 
-**monitor dispara → leia o GitHub → 1 handoff por evento → atualize o estado → rearme.**
+**vigia dispara → leia o GitHub → 1 handoff por evento → atualize o estado → feche o baseline.**
 
 > **GitHub não é canal automático.** Se não houve handoff, o especialista **não recebeu nada** — ele não consulta o repo por conta própria. Todo evento vira handoff: comentário, aprovação, fechamento, issue nova. Sem exceção, sem "está público lá".
 
@@ -60,116 +60,109 @@ Monitor que não vê fica **silencioso igual a monitor sem novidade**. Antes de 
 
 ```bash
 export GH_CONFIG_DIR="$GHC"; R=<owner/repo>
-gh issue list --repo $R --state all --limit 100 --json number,state -q '.[] | "\(.number):\(.state)"' | sort
+gh issue list --repo $R --state all --limit 200 --json number,state -q '.[] | "\(.number):\(.state)"' | sort
 gh api repos/$R/issues/comments --paginate -q '.[].id' 2>/dev/null | sort -n | tail -1
 ```
 A lista tem que bater com a realidade, e o maior id precisa conter um comentário que você **sabe** que existe (`... | grep -c <id-conhecido>` → `1`). Repo sem comentário nenhum devolve vazio — é esperado.
 
-## 4. Armar
+## 4. Armar a vigia — cron de HORA EM HORA
 
-🔴 **Monitor de fundo e tique do BUS NÃO convivem na mesma sessão.** Medido em 20/08/2026 (`rh-proxima`): a sessão `po`, a única que segurava um monitor, rodou **1** tique o dia inteiro — os pares rodaram de 99 a 235. Enquanto a tarefa de fundo está viva, o cron do BUS não acorda a sessão: o especialista **some do BUS sem erro visível**, que é o pior modo de falha daqui. Escolha por onde sair, nesta ordem:
+🔴 **Tarefa de fundo viva IMPEDE o tique do BUS de chegar na sessão.** Medido em 20/08/2026 (`rh-proxima`): a sessão `po`, a única que segurava um monitor, rodou **1** tique o dia inteiro — os pares rodaram de 99 a 235. E o especialista **some do BUS sem erro nenhum**, que é o pior modo de falha daqui.
 
-- **Carteiro em sessão própria** (o modo `externo` do passo 1) — **preferido**. Sem tique do BUS pra atrapalhar, o monitor de fundo é o desenho certo: **zero token** enquanto espera e acorda só quando muda. Siga com o bloco `run_in_background` abaixo.
-- **Carteiro dentro da sessão de um especialista registrado** (`externo: false`) → **nada de monitor de fundo.** Troque por um **cron recorrente**, que não deixa tarefa pendurada — receita logo abaixo.
+Por isso a vigia padrão **não é um processo pendurado**: é um **cron horário** que roda uma **passada única** do verificador — sem laço, sem `sleep`, ~6s e sai. Nada fica preso, o tique do BUS continua chegando.
 
-🔴 **ORDEM DO TURNO: escreva no GitHub ANTES de armar** — vale para as DUAS variantes. Vai comentar, abrir ou fechar issue nesta passada? **Faça tudo isso primeiro**, e só então capture o baseline. Armar antes faz a vigia acordar com o **eco da sua própria ação** — e você processa um "evento" que foi você mesmo. *Não basta saber a regra: o erro se repete porque a captura cai no fim de um turno longo, quando já se esqueceu do que se escreveu no começo. Se já armou e ainda falta comentar: pare a vigia, comente, rearme.*
+O verificador vem pronto: **`git-watch-tick.sh`** (ao lado desta skill na instalação local; em `bin/` no plugin). Ele lê o GitHub, compara com o baseline em `<raiz-do-projeto-no-bus>/.git-watch-<owner>-<repo>.base` e imprime **um** veredicto:
 
-### 4b. Variante cron (sessão que também é especialista do BUS)
+| saída | significa | exit |
+|---|---|---|
+| `GITWATCH_BASELINE_GRAVADO` | 1ª passada: gravou o snapshot, não há o que comparar | 0 |
+| `GITWATCH_SEM_NOVIDADE` | nada mudou — encerre calado | 0 |
+| `MUDOU_NO_GITHUB` | + `antes`/`agora`, issues abertas e último comentário | 0 |
+| `GITWATCH_CEGO` | **não conseguiu ler** (auth, rate limit, 404) — **não é mudança** | 2 |
 
-O cron dispara **texto puro**, então o comando não pode ser montado na hora: grave o verificador **uma vez** e aponte pra ele.
+Ele resolve o `GH_CONFIG_DIR` sozinho (`<projeto>/ghconf`, passo 2) e **nunca** avança o baseline sozinho quando detecta mudança: quem fecha o ciclo é você, com `--commit`, **depois** de despachar os handoffs (passo 6). Se ele avançasse no ato, um evento processado pela metade (turno morto, `/clear` no meio) sumiria do radar pra sempre.
 
-1. **Grave o script** (ferramenta `Write`, não heredoc — acento não sobrevive ao shell) em `<raiz-do-projeto-no-bus>/.git-watch-<owner>-<repo>.sh`, com: `export GH_CONFIG_DIR=<GHC>`, `R=<owner/repo>`, o **mesmo `snap()` do passo 3** e, no fim:
+**1. Capture o baseline** — *depois* de escrever no GitHub (ver ORDEM DO TURNO abaixo):
 
 ```bash
-BASE_FILE="$0.base"
-CUR=$(snap) || { echo "GITWATCH_CEGO: leitura invalida -- NAO e mudanca"; exit 2; }
-if [ ! -f "$BASE_FILE" ]; then printf '%s' "$CUR" > "$BASE_FILE"; echo "GITWATCH_BASELINE_GRAVADO"; exit 0; fi
-if [ "$CUR" = "$(cat "$BASE_FILE")" ]; then echo "GITWATCH_SEM_NOVIDADE"; exit 0; fi
-echo "MUDOU_NO_GITHUB"; echo "antes: $(cat "$BASE_FILE")"; echo "agora: $CUR"
-gh issue list --repo $R --state open --json number,title,updatedAt -q '.[] | "#\(.number) \(.title) (atualizada \(.updatedAt))"' 2>/dev/null
-gh api repos/$R/issues/comments --paginate -q 'max_by(.id) | "issue \(.issue_url | split("/") | last) por \(.user.login): \(.body[0:500])"' 2>/dev/null
+bash '<caminho absoluto do git-watch-tick.sh>' --repo <owner/repo> --project <PROJECT>
 ```
 
-   O script **não** atualiza o `.base` quando muda: quem fecha o ciclo é você, depois de processar os eventos (passo 6) — senão um evento processado pela metade some do radar.
-
-2. **Arme** com o prompt **começando por `git-watch:`**:
+**2. Arme o cron horário.** O prompt é **texto puro** e começa por `git-watch:`:
 
 ```
-CronCreate(cron:"*/10 * * * *", recurring:true,
-  prompt:"git-watch: rode bash '<caminho do .sh>' e siga a saida; GITWATCH_SEM_NOVIDADE -> encerre calado")
+CronCreate(cron:"0 * * * *", recurring:true,
+  prompt:"git-watch: rode bash '<caminho absoluto do git-watch-tick.sh>' --repo <owner/repo> --project <PROJECT> e siga a saida; GITWATCH_SEM_NOVIDADE -> encerre calado")
 ```
 
-⚠️ **O prompt do cron não pode começar com `/bus` nem `bus-tick`** — o passo 1 do protocolo do BUS manda apagar **todo** job que comece assim, e o seu monitor sumiria no primeiro wake do especialista. Começando por `git-watch:` ele sobrevive; e, pelo mesmo motivo, o cron do BUS sobrevive ao seu.
+⚠️ **Resolva o caminho UMA vez e copie literal.** O prompt do cron não expande variável: um `${CLAUDE_PLUGIN_ROOT}` gravado ali vira texto e a vigia quebra **em silêncio** — mesma lição do `BUS_TICK_PROMPT`.
 
-⚠️ **Terminou um turno de git-watch numa sessão registrada? Confira o cron do BUS antes de encerrar** (`CronList` → tem que existir o job `bus-tick`). Re-arme se sumiu: seu turno pode ter passado por cima dele, e ninguém avisa quando o tique para.
+**Por que de hora em hora:** cada passada acorda o modelo de verdade (ao contrário do tique do BUS, que o gate bloqueia de graça quando não há handoff). Uma issue esperando até 1h custa muito menos que 12 acordadas vazias por hora. Precisa de **reação imediata** a evento no GitHub? Aí o snapshot-diff contínuo é o instrumento certo — e ele só cabe **fora** de uma sessão do BUS (4b).
 
-**O preço é honesto:** o cron acorda o modelo a cada tique (uma chamada + a saída do script, ~200 tokens sem novidade), contra **zero** do monitor de fundo. É o custo de dividir a sessão com o BUS — se pesar, use o carteiro externo.
+⚠️ **O prompt do cron não pode começar com `/bus` nem `bus-tick`** — o passo 1 do protocolo do BUS manda apagar **todo** job que comece assim, e a sua vigia sumiria no primeiro wake do especialista. Começando por `git-watch:` ela sobrevive; e, pelo mesmo motivo, **o desarme do BUS não apaga o seu cron**. Depois de um `/bus-reload` os dois têm que aparecer no `CronList` — se só o do git sumiu, é rearmar ele sozinho.
 
-### 4c. Monitor de fundo (só em sessão que NÃO é especialista do BUS)
+⚠️ **Antes de encerrar um turno de git-watch numa sessão registrada, confira que o cron do BUS continua armado** (`CronList` → tem que existir o job do `bus-tick`). Ninguém avisa quando o tique para.
+
+🔴 **ORDEM DO TURNO: escreva no GitHub ANTES de capturar o baseline** — vale para as DUAS variantes. Vai comentar, abrir ou fechar issue nesta passada? **Faça tudo isso primeiro.** Capturar antes faz a vigia acordar com o **eco da sua própria ação** — e você processa um "evento" que foi você mesmo. *Não basta saber a regra: o erro se repete porque a captura cai no fim de um turno longo, quando já se esqueceu do que se escreveu no começo. Já capturou e ainda falta comentar? Comente e refaça o baseline com `--commit`.*
+
+### 4b. Alternativa: monitor de fundo (só fora de sessão do BUS, quando 1h é demais)
+
+Só faz sentido no **carteiro externo** (passo 1), que não tem tique do BUS pra atrapalhar. Vantagem: **zero token** enquanto espera e latência de ~2 min. Preço: é um processo pendurado — em sessão registrada no BUS, **não use**.
 
 ⚠️ **Pare o monitor anterior antes** (`TaskStop <task_id>`): dois monitores do mesmo repo acordam você em duplicidade.
 
-Rode com `run_in_background: true`:
-
-🔴 **"Não consegui ler" é um TERCEIRO estado — nunca o compare.** Quando a API falha, ela devolve um **corpo de erro**: não-vazio e diferente do baseline. Comparar string crua faz isso virar `MUDOU_NO_GITHUB` e disparar handoff **sem evento nenhum** — aconteceu duas vezes em produção (conta do `gh` trocada por outra sessão; 404 transitório). Por isso o `snap()` **valida o próprio formato** e falha com `return 1`, e o laço conta leituras cegas em vez de comparar lixo.
+Rode com `run_in_background: true` (o `for` em **foreground dentro da tarefa** — `nohup ... &` deixa o laço órfão e ele nunca notifica):
 
 ```bash
 export GH_CONFIG_DIR="$GHC"   # conta isolada (passo 2) -- sem isso o monitor herda a conta global
-R=<owner/repo>
-snap() {
-  local issues cid
-  issues=$(gh issue list --repo $R --state all --limit 100 --json number,state -q '.[] | "\(.number):\(.state)"' 2>/dev/null | sort | tr '\n' ' ')
-  cid=$(gh api repos/$R/issues/comments --paginate -q '.[].id' 2>/dev/null | sort -n | tail -1)
-  echo "$issues" | grep -qE '^([0-9]+:[A-Z]+ )+$' || return 1
-  [ -z "$cid" ] || echo "$cid" | grep -qE '^[0-9]+$' || return 1
-  printf '%s%s' "$issues" "$cid"
-}
-BASE=$(snap) || { echo "MONITOR_NAO_ARMOU: leitura invalida no baseline"; exit 1; }
-echo "baseline: $BASE"
-CEGO=0
+GW='<caminho absoluto do git-watch-tick.sh>'
 for i in $(seq 1 240); do
-  if ! CUR=$(snap); then
-    CEGO=$((CEGO+1))
-    if [ $CEGO -ge 5 ]; then
-      echo "MONITOR_CEGO: 5 leituras invalidas seguidas (~10min). ISTO NAO E MUDANCA."
-      echo "Confira a ferramenta antes de concluir: gh auth status / gh api rate_limit."
-      exit 2
-    fi
-    sleep 120; continue
-  fi
-  CEGO=0
-  if [ "$CUR" != "$BASE" ]; then
-    echo "MUDOU_NO_GITHUB"; echo "antes: $BASE"; echo "agora: $CUR"
-    echo "--- issues abertas ---"
-    gh issue list --repo $R --state open --json number,title,updatedAt -q '.[] | "#\(.number) \(.title) (atualizada \(.updatedAt))"' 2>/dev/null
-    echo "--- ultimo comentario ---"
-    gh api repos/$R/issues/comments --paginate -q 'max_by(.id) | "issue \(.issue_url | split("/") | last) por \(.user.login): \(.body[0:500])"' 2>/dev/null
-    exit 0
-  fi
+  OUT=$(bash "$GW" --repo <owner/repo> --project <PROJECT>); RC=$?
+  case "$OUT" in
+    *MUDOU_NO_GITHUB*) echo "$OUT"; exit 0;;
+    *GITWATCH_CEGO*)   CEGO=$((${CEGO:-0}+1)); [ $CEGO -ge 5 ] && { echo "$OUT"; echo "MONITOR_CEGO: 5 leituras invalidas seguidas. ISTO NAO E MUDANCA."; exit 2; };;
+    *)                 CEGO=0;;
+  esac
   sleep 120
 done
 echo "MONITOR_EXPIROU: 8h sem novidade"
 ```
 
-**Códigos de saída:** `0` = mudou · `1` = não armou (baseline inválido) · `2` = cego (~10 min sem conseguir ler).
-
-`240 × 120s` ≈ 8 h. Ajuste os dois números conforme a espera, **sempre com teto**.
+`240 × 120s` ≈ 8 h. Ajuste os dois números conforme a espera, **sempre com teto** — e o teto existe porque monitor que já disparou está morto: enquanto nada estiver armado, ninguém está vigiando.
 
 ## 5. Quando ele te acordar
 
-A notificação só diz que a tarefa terminou — **leia o arquivo de output**.
+No cron, a saída do script **é** o wake. No monitor de fundo, a notificação só diz que a tarefa terminou — **leia o arquivo de output**.
 
-**`MONITOR_EXPIROU`** (saída 0 sem `MUDOU_`) → nada mudou. Faça a reconciliação (passo 6) e rearme se ainda faz sentido.
+**`GITWATCH_SEM_NOVIDADE`** (ou `MONITOR_EXPIROU`) → nada mudou **no GitHub** — o que não quer dizer "nada a fazer". Passe pelo ***Antes de fechar o turno*** (abaixo) e encerre calado se de fato não houver o que despachar. No cron **não há o que rearmar**: ele é recorrente.
 
-**`MONITOR_CEGO`** (saída 2) ou **`MONITOR_NAO_ARMOU`** (saída 1) → **NÃO houve evento. Não mande handoff.** A ferramenta é que parou de enxergar: cheque `gh auth status` (outra sessão pode ter trocado a conta — é global) e `gh api rate_limit`. Conserte e rearme; só então reconcilie, porque durante a cegueira você **não** estava vigiando.
+**`GITWATCH_CEGO`** (saída 2, ou `MONITOR_CEGO`/`MONITOR_NAO_ARMOU`) → **NÃO houve evento. Não mande handoff.** A ferramenta é que parou de enxergar: cheque `gh auth status` (com o `GH_CONFIG_DIR` do projeto) e `gh api rate_limit`. Conserte e só então reconcilie, porque durante a cegueira você **não** estava vigiando.
+
+**`GITWATCH_BASELINE_GRAVADO`** → primeira passada. Não é evento: não existia baseline pra comparar.
 
 **`MUDOU_NO_GITHUB`** → para **CADA** evento:
 
 1. **Mande o handoff** (*enviar* do `/bus`, com `-Project <PROJECT>`, `-From <SLUG>` e **`-Issue <url ou número>`**) pro especialista dono do assunto. O `-Issue` grava `issue:` no handoff: o BUS entrega isso como `BUS_ISSUE=` e o especialista já sabe, **pelo protocolo**, que o retorno vai pro ticket — não depende de ele ter lido o corpo até o fim.
 2. **Melhore o enunciado**: explicite o que muda, onde e por quê; separe o que ele já sabe do que é novo; deixe clara a próxima ação. **Não analise e não responda o ticket** — quem valida e responde é o dono do território.
 3. **Fila: um ticket por vez POR ESPECIALISTA.** Não repasse o #2 dele enquanto o #1 não fechar. Mas **não** é fila global: segurar um ticket de frontend porque um de backend está aberto deixa gente ociosa com trabalho na mesa.
+
+   ⚠️ **Onde você comenta é uma instrução implícita.** Comentar numa issue **enfileirada** convida o dono a trabalhar nela — mesmo que o texto diga "não comece". Ele responde, e o tempo sai da issue **ativa**. Se ela está parada esperando decisão de terceiros, diga isso **UMA vez** no ticket e **pare de alimentar o thread**. Levantamento em issue enfileirada é trabalho fora da fila: você vira a fonte da distração *e* do inbox vazio ao mesmo tempo.
 4. **Registre o evento** no estado (passo 6).
-5. **Reconcilie e rearme** — o monitor morre ao disparar; enquanto nada estiver armado, ninguém está vigiando.
+5. **Feche o ciclo:** rode o verificador com **`--commit`** (só agora — antes disso o evento ainda não foi despachado) e atualize o checkpoint do estado. No **monitor de fundo**, rearme também: ele morre ao disparar, e enquanto nada estiver armado ninguém está vigiando.
+
+### Antes de fechar o turno — em TODA passada (inclusive `GITWATCH_SEM_NOVIDADE`)
+
+🔴 **O handoff é o que MOVE o trabalho, não um aviso sobre ele.** Enquanto houver issue aberta que não depende do operador, o inbox de cada especialista precisa ter trabalho. **Inbox vazio não é silêncio limpo: é alguém parado.** "Não houve evento novo" **NÃO** justifica inbox vazio — se a fila dele tem issue e a mão dele está livre, despache a próxima. A regra evento→handoff tem uma segunda metade: **fila-com-trabalho→handoff**.
+
+> Isto **não** contradiz *"não trate cegueira como novidade"*: o proibido é **fabricar** handoff a partir de um evento que não existiu (`MONITOR_CEGO`/`MONITOR_NAO_ARMOU`). Despachar trabalho **já enfileirado** não nasce de evento nenhum — nasce da fila, e ela existe independentemente do monitor.
+
+**Confira o "assumido" nas issues ATIVAS.** Sem esse comentário, especialista trabalhando e sessão morta produzem o mesmo sinal — nada. Não existe? **Isso é um evento por si só:** despache um handoff pedindo o sinal. Um comando responde:
+
+```bash
+gh api repos/$R/issues/<n>/comments -q 'length'   # 0 = ninguem acusou recebimento
+```
+
+Ter o caveat escrito não basta: **é passo do ciclo, não recado ao especialista.** Uma issue já passou mais de uma hora com zero comentários porque a checagem nunca virou ação — e quem percebeu foi o operador.
 
 ### Corpo do handoff
 
@@ -220,11 +213,14 @@ Guarde no **projeto do BUS**, não no scratchpad da sessão: `<base>/<PROJECT>/.
 { "repo": "owner/repo", "rules_file": "<caminho do doc de regras deste projeto>",
   "bus": { "project": "<projeto>", "from_slug": "<slug de origem dos handoffs>",
            "externo": true, "motivo": "carteiro write-only: escreve handoff, nao le inbox" },
+  "vigia": { "modo": "cron", "cron": "0 * * * *", "prompt_prefixo": "git-watch:" },
   "last_checked": "<ISO>", "issues_checkpoint": "1:CLOSED 2:OPEN", "last_comment_id": 123456,
   "events": [ { "timestamp": "<ISO>", "type": "issue_opened|comment|issue_closed", "issue": 2, "actor": "<login>" } ] }
 ```
 
-**Antes de rearmar, reconcilie:** compare o `snap()` atual com o checkpoint salvo. Divergiu? Há eventos que chegaram **enquanto você processava** — trate-os *antes* de rearmar e só então atualize o checkpoint. É isso que fecha a janela cega entre o disparo e o rearme.
+O **baseline** da vigia é um arquivo separado (`.git-watch-<owner>-<repo>.base`, escrito só pelo `git-watch-tick.sh`): o JSON guarda o *histórico*, o `.base` guarda o *ponto de comparação*. Anote em `vigia` como ela está armada (`cron` ou `monitor`) — quem retomar depois de um `/clear` precisa saber o que procurar no `CronList`.
+
+**Antes de fechar o baseline, reconcilie:** rode o verificador de novo e compare com o checkpoint salvo. Divergiu? Há eventos que chegaram **enquanto você processava** — trate-os *antes* de rearmar e só então atualize o checkpoint. É isso que fecha a janela cega entre o disparo e o rearme.
 
 ## Erros que causam falha SILENCIOSA
 
@@ -232,10 +228,13 @@ Guarde no **projeto do BUS**, não no scratchpad da sessão: `<base>/<PROJECT>/.
 - ❌ **Cron do monitor com prompt começando em `/bus` ou `bus-tick`** → o próprio protocolo do BUS apaga o job no primeiro wake do especialista.
 - ❌ **`nohup ... &` dentro do background** → o wrapper sai em ~1s, o harness dá a tarefa por concluída e o loop fica **órfão**: nunca notifica. Rode o `for` em foreground dentro da tarefa. Voltou em segundos? Está órfão.
 - ❌ **Monitorar UMA issue** (`gh issue view <n>`) → issue nova nasce sem ninguém ver. Monitore o **repo**.
-- ❌ **Reusar monitor que já disparou** → ele fez `exit 0`; nada está vigiando.
-- ❌ **Rearmar sem reconciliar** → perde o que chegou durante o processamento.
+- ❌ **Reusar monitor de fundo que já disparou** → ele fez `exit 0`; nada está vigiando. (No cron não existe esse erro: ele é recorrente.)
+- ❌ **Fechar o baseline (`--commit`) antes de despachar os handoffs** → o evento vira "já visto" sem ter sido tratado, e nunca mais reaparece.
+- ❌ **Fechar o baseline sem reconciliar** → perde o que chegou durante o processamento.
 - ❌ **Comparar snapshot sem validar o formato** → resposta de erro da API vira "mudou" e dispara handoff **sem evento**.
-- ❌ **Tratar `MONITOR_CEGO`/`MONITOR_NAO_ARMOU` como novidade** → o alarme falso gasta a atenção de quem devia estar codando; a regra "todo evento = handoff" **não** tem inverso.
+- ❌ **Tratar `MONITOR_CEGO`/`MONITOR_NAO_ARMOU` como novidade** → o alarme falso gasta a atenção de quem devia estar codando; a regra "todo evento = handoff" **não** tem inverso — evento inexistente não vira handoff. (Isso proíbe **inventar evento**; despachar trabalho **já enfileirado** continua obrigatório — ver *Antes de fechar o turno*.)
+- ❌ **Encerrar o ciclo com inbox vazio e issue aberta** → especialista ocioso. O sintoma é **indistinguível de "tudo em dia"**: ninguém reclama, nada falha, e o trabalho simplesmente não anda.
+- ❌ **Fechar o turno sem conferir o "assumido" nas issues ativas** → uma sessão morta parece exatamente igual a uma trabalhando.
 - ❌ **Registrar o carteiro externo no BUS** → ele passa a receber handoff que ninguém lê.
 - ❌ **Handoff sem `-Project`** (ou com `default`) → entra na fila errada e some.
 - ❌ **"Está público no GitHub, eles veem."** Não veem.
