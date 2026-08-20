@@ -1,11 +1,11 @@
 ---
 name: bus-git-watch
-description: Vigia as issues de um repositório GitHub e converte CADA evento (issue nova, comentário, fechamento) em handoff do BUS para o especialista dono do assunto. Arma um monitor de fundo que só acorda a sessão quando algo muda. Invoque com /bus-git-watch [owner/repo]. Complementa o /bus: o BUS move o trabalho, o GitHub guarda o histórico e o backlog.
+description: Vigia as issues de um repositório GitHub e converte CADA evento (issue nova, comentário, fechamento) em handoff do BUS para o especialista dono do assunto. Arma a vigia que só acorda a sessão quando algo muda (monitor de fundo em sessão própria; cron se dividir a sessão com um especialista do BUS). Invoque com /bus-git-watch [owner/repo]. Complementa o /bus: o BUS move o trabalho, o GitHub guarda o histórico e o backlog.
 ---
 
 # /bus-git-watch — issues do GitHub → handoffs do BUS
 
-Você é o **carteiro entre o GitHub e o BUS**, na sessão de um especialista já registrado (tipicamente o **controlador/PO**). O ciclo é sempre o mesmo:
+Você é o **carteiro entre o GitHub e o BUS**. Duas montagens possíveis, e a escolha muda o passo 4: **sessão própria** (carteiro externo, write-only — a preferida) ou **dentro da sessão de um especialista já registrado** (tipicamente o **controlador/PO**), que **não pode** segurar monitor de fundo. O ciclo é sempre o mesmo:
 
 **monitor dispara → leia o GitHub → 1 handoff por evento → atualize o estado → rearme.**
 
@@ -67,9 +67,47 @@ A lista tem que bater com a realidade, e o maior id precisa conter um comentári
 
 ## 4. Armar
 
-⚠️ **Pare o monitor anterior antes** (`TaskStop <task_id>`): dois monitores do mesmo repo acordam você em duplicidade.
+🔴 **Monitor de fundo e tique do BUS NÃO convivem na mesma sessão.** Medido em 20/08/2026 (`rh-proxima`): a sessão `po`, a única que segurava um monitor, rodou **1** tique o dia inteiro — os pares rodaram de 99 a 235. Enquanto a tarefa de fundo está viva, o cron do BUS não acorda a sessão: o especialista **some do BUS sem erro visível**, que é o pior modo de falha daqui. Escolha por onde sair, nesta ordem:
 
-🔴 **ORDEM DO TURNO: escreva no GitHub ANTES de armar.** Vai comentar, abrir ou fechar issue nesta passada? **Faça tudo isso primeiro**, e só então capture o baseline. Armar antes faz o monitor acordar com o **eco da sua própria ação** — e você processa um "evento" que foi você mesmo. *Não basta saber a regra: o erro se repete porque a captura cai no fim de um turno longo, quando já se esqueceu do que se escreveu no começo. Se já armou e ainda falta comentar: pare o monitor, comente, rearme.*
+- **Carteiro em sessão própria** (o modo `externo` do passo 1) — **preferido**. Sem tique do BUS pra atrapalhar, o monitor de fundo é o desenho certo: **zero token** enquanto espera e acorda só quando muda. Siga com o bloco `run_in_background` abaixo.
+- **Carteiro dentro da sessão de um especialista registrado** (`externo: false`) → **nada de monitor de fundo.** Troque por um **cron recorrente**, que não deixa tarefa pendurada — receita logo abaixo.
+
+🔴 **ORDEM DO TURNO: escreva no GitHub ANTES de armar** — vale para as DUAS variantes. Vai comentar, abrir ou fechar issue nesta passada? **Faça tudo isso primeiro**, e só então capture o baseline. Armar antes faz a vigia acordar com o **eco da sua própria ação** — e você processa um "evento" que foi você mesmo. *Não basta saber a regra: o erro se repete porque a captura cai no fim de um turno longo, quando já se esqueceu do que se escreveu no começo. Se já armou e ainda falta comentar: pare a vigia, comente, rearme.*
+
+### 4b. Variante cron (sessão que também é especialista do BUS)
+
+O cron dispara **texto puro**, então o comando não pode ser montado na hora: grave o verificador **uma vez** e aponte pra ele.
+
+1. **Grave o script** (ferramenta `Write`, não heredoc — acento não sobrevive ao shell) em `<raiz-do-projeto-no-bus>/.git-watch-<owner>-<repo>.sh`, com: `export GH_CONFIG_DIR=<GHC>`, `R=<owner/repo>`, o **mesmo `snap()` do passo 3** e, no fim:
+
+```bash
+BASE_FILE="$0.base"
+CUR=$(snap) || { echo "GITWATCH_CEGO: leitura invalida -- NAO e mudanca"; exit 2; }
+if [ ! -f "$BASE_FILE" ]; then printf '%s' "$CUR" > "$BASE_FILE"; echo "GITWATCH_BASELINE_GRAVADO"; exit 0; fi
+if [ "$CUR" = "$(cat "$BASE_FILE")" ]; then echo "GITWATCH_SEM_NOVIDADE"; exit 0; fi
+echo "MUDOU_NO_GITHUB"; echo "antes: $(cat "$BASE_FILE")"; echo "agora: $CUR"
+gh issue list --repo $R --state open --json number,title,updatedAt -q '.[] | "#\(.number) \(.title) (atualizada \(.updatedAt))"' 2>/dev/null
+gh api repos/$R/issues/comments --paginate -q 'max_by(.id) | "issue \(.issue_url | split("/") | last) por \(.user.login): \(.body[0:500])"' 2>/dev/null
+```
+
+   O script **não** atualiza o `.base` quando muda: quem fecha o ciclo é você, depois de processar os eventos (passo 6) — senão um evento processado pela metade some do radar.
+
+2. **Arme** com o prompt **começando por `git-watch:`**:
+
+```
+CronCreate(cron:"*/10 * * * *", recurring:true,
+  prompt:"git-watch: rode bash '<caminho do .sh>' e siga a saida; GITWATCH_SEM_NOVIDADE -> encerre calado")
+```
+
+⚠️ **O prompt do cron não pode começar com `/bus` nem `bus-tick`** — o passo 1 do protocolo do BUS manda apagar **todo** job que comece assim, e o seu monitor sumiria no primeiro wake do especialista. Começando por `git-watch:` ele sobrevive; e, pelo mesmo motivo, o cron do BUS sobrevive ao seu.
+
+⚠️ **Terminou um turno de git-watch numa sessão registrada? Confira o cron do BUS antes de encerrar** (`CronList` → tem que existir o job `bus-tick`). Re-arme se sumiu: seu turno pode ter passado por cima dele, e ninguém avisa quando o tique para.
+
+**O preço é honesto:** o cron acorda o modelo a cada tique (uma chamada + a saída do script, ~200 tokens sem novidade), contra **zero** do monitor de fundo. É o custo de dividir a sessão com o BUS — se pesar, use o carteiro externo.
+
+### 4c. Monitor de fundo (só em sessão que NÃO é especialista do BUS)
+
+⚠️ **Pare o monitor anterior antes** (`TaskStop <task_id>`): dois monitores do mesmo repo acordam você em duplicidade.
 
 Rode com `run_in_background: true`:
 
@@ -190,6 +228,8 @@ Guarde no **projeto do BUS**, não no scratchpad da sessão: `<base>/<PROJECT>/.
 
 ## Erros que causam falha SILENCIOSA
 
+- ❌ **Monitor de fundo numa sessão registrada no BUS** → o tique do BUS para de chegar e o especialista some do bus **sem erro nenhum** (medido: 1 tique no dia contra 99–235 dos pares). Nessa sessão, monitor é cron (passo 4b).
+- ❌ **Cron do monitor com prompt começando em `/bus` ou `bus-tick`** → o próprio protocolo do BUS apaga o job no primeiro wake do especialista.
 - ❌ **`nohup ... &` dentro do background** → o wrapper sai em ~1s, o harness dá a tarefa por concluída e o loop fica **órfão**: nunca notifica. Rode o `for` em foreground dentro da tarefa. Voltou em segundos? Está órfão.
 - ❌ **Monitorar UMA issue** (`gh issue view <n>`) → issue nova nasce sem ninguém ver. Monitore o **repo**.
 - ❌ **Reusar monitor que já disparou** → ele fez `exit 0`; nada está vigiando.
