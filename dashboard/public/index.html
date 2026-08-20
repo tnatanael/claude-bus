@@ -33,32 +33,37 @@
   header {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     padding: 14px 20px;
     border-bottom: 1px solid var(--border);
     background: var(--panel);
     position: sticky;
     top: 0;
     z-index: 10;
-    flex-wrap: wrap;
+    /* UMA LINHA, sempre. Com wrap, a lockbar caia pra uma segunda linha assim que aparecia o
+       2o holder. Quem encolhe e a lockbar (min-width:0 + reticencias); o resto e flex:0 0 auto. */
+    flex-wrap: nowrap;
   }
   header h1 {
     font-size: 16px;
     margin: 0;
     letter-spacing: 0.3px;
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   header h1 .dot {
     color: var(--accent);
   }
   .meta {
     display: flex;
-    gap: 16px;
+    gap: 12px;
     align-items: center;
     margin-left: auto;
     font-size: 12px;
     color: var(--muted);
     font-family: var(--mono);
-    flex-wrap: wrap;
+    flex: 0 0 auto;      /* não encolhe: o "check"/"slots" são botões, cortá-los quebraria o clique */
+    flex-wrap: nowrap;   /* wrap aqui = cabeçalho de 2 linhas por dentro */
   }
   .meta b { color: var(--text); font-weight: 600; }
   .cron-cfg { display: inline-flex; align-items: center; gap: 3px; }
@@ -68,7 +73,7 @@
   #projectSel { background: rgba(88,166,255,.14); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 9px; font-size: 13px; font-weight: 700; cursor: pointer; outline: none; }
   #projectSel:hover { background: rgba(88,166,255,.24); }
   #projectSel option { background: var(--panel-2); color: var(--text); font-weight: 600; }
-  .proj-controls { display: inline-flex; align-items: center; gap: 8px; }
+  .proj-controls { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
   .proj-cycle { background: rgba(88,166,255,.14); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 10px; font-size: 14px; font-weight: 700; cursor: pointer; line-height: 1; }
   .proj-cycle:hover { background: rgba(88,166,255,.28); }
   .proj-edit { margin-left: 7px; padding: 1px 6px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; vertical-align: middle; line-height: 1; }
@@ -378,7 +383,16 @@
 /* Com 1 slot cabia nos 210px fixos; com N holders o texto vazava PRA FORA da caixa (width fixo +
    nowrap nao corta nem quebra, so transborda). Agora a caixa CRESCE ate um teto e, passando
    disso, quebra em mais linhas -- nunca invade o resto do cabecalho nem sai da tela. */
-.lockbar { flex: 0 1 auto; min-width: 210px; max-width: min(52vw, 560px); margin: 0; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; text-align: center; }
+/* O cabeçalho é UMA linha (header/.meta em nowrap): quem cede espaço aqui é a lockbar, o único
+   item de tamanho imprevisível (1 a 3 holders). Ela encolhe e corta com reticências -- MAS o
+   corte fica no .lk-text, não na barra: overflow:hidden na barra clipava o balão do "!". */
+.lockbar { display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: min(50vw, 720px); margin: 0 2px; padding: 5px 12px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; white-space: nowrap; line-height: 1.35; }
+.lockbar .lk-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Janela estreita: quem sai é INFORMATIVO (caminho do bus root, relógio) -- nunca os botões e
+   nunca a lockbar inteira. Sem isto, "uma linha só" viraria scroll horizontal, que é pior que
+   a quebra que o operador reclamou. O bus root continua no title do próprio elemento. */
+@media (max-width: 1320px) { .meta-root { display: none; } }
+@media (max-width: 1080px) { .meta-now  { display: none; } }
 .proj-title { color: var(--accent); font-weight: 700; }
 .hammer { display: inline-block; transform-origin: 75% 75%; animation: hammer-tap .55s ease-in-out infinite; }
 @keyframes hammer-tap { 0%,100% { transform: rotate(-20deg); } 55% { transform: rotate(12deg); } }
@@ -388,11 +402,11 @@
 .lockbar .lk-proj { opacity: .7; }
 .lockbar .lk-free { font-weight: 600; }
 .lockbar .lk-lease { color: #ffcf66; }
-.pausebtn { margin-left: 8px; padding: 2px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: #cdd3dc; }
+.pausebtn { margin-left: 8px; padding: 2px 7px; line-height: 1.25; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: #cdd3dc; }
 .pausebtn:hover { border-color: rgba(255,255,255,.35); }
 .pausebtn.running { background: rgba(224,160,0,.14); border-color: rgba(224,160,0,.45); color: #ffcf66; }
 .pausebtn.paused { background: rgba(80,200,120,.16); border-color: rgba(80,200,120,.55); color: #7fe0a0; }
-.offbtn { margin-left: 6px; padding: 2px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; background: rgba(230,70,70,.12); border: 1px solid rgba(230,70,70,.45); color: #ff8f8f; }
+.offbtn { margin-left: 6px; padding: 2px 7px; line-height: 1.25; border-radius: 6px; font-size: 12px; cursor: pointer; background: rgba(230,70,70,.12); border: 1px solid rgba(230,70,70,.45); color: #ff8f8f; }
 .offbtn:hover { background: rgba(230,70,70,.22); border-color: rgba(230,70,70,.75); }
 .offbtn:disabled { opacity: .5; cursor: default; }
 .lk-info { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:5px; border-radius:50%; background:rgba(255,255,255,.18); color:#fff; font-size:11px; font-weight:700; cursor:help; position:relative; vertical-align:middle; }
@@ -427,16 +441,15 @@
 <body>
 <header>
   <h1><span class="dot">●</span> BUS Live Dashboard<span class="lk-info info-left" tabindex="0">!<span class="lk-tip"><b>Somente-leitura</b> do BUS em disco, com duas exceções, ambas por clique explícito seu: <b>Pausar</b> (liga/desliga o marcador de pausa do projeto) e <b>Desativar</b> (enfileira um handoff de encerramento pra cada especialista ativo do projeto). Nunca move nem apaga handoff existente. Atualiza a cada 1,5s. Os conectores entre cards vêm do <code>inReplyTo</code>. Clique num card pra ler o handoff e a thread inteira.</span></span></h1>
-  <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button><button id="offBtn" class="offbtn" style="display:none" title="Encerra o BUS deste projeto: manda cada especialista ATIVO (verde) desarmar o cron e parar. Quem já está offline não recebe nada.">⏻ Desativar</button></span>
+  <span class="proj-controls"><select id="projectSel" title="Trocar de projeto"><option value="">— selecione —</option></select><button id="projCycle" class="proj-cycle" title="Próximo projeto (1 clique)" style="display:none">→</button><button id="pauseBtn" class="pausebtn" style="display:none"></button><button id="offBtn" class="offbtn" style="display:none" title="Encerra o BUS deste projeto: manda cada especialista ATIVO (verde) desarmar o cron e parar. Quem já está offline não recebe nada.">⏻</button></span>
+  <div id="lockbar" class="lockbar free">🔓 lock livre</div>
   <div class="meta">
-    <span><span class="pulse on" id="pulse"></span><span id="poll">polling /api/state</span></span>
     <span class="cron-cfg" title="Intervalo do auto-recheck (cron */N min, 1–30). Grava no BUS; cada especialista pega no próximo /bus (~1 ciclo, não é instantâneo).">check: <button class="cron-step" id="cronDec" type="button">−</button><b id="cronVal">5</b>m<button class="cron-step" id="cronInc" type="button">+</button></span>
     <span class="cron-cfg" id="slotCfg" style="display:none" title="Quantos especialistas deste projeto trabalham AO MESMO TEMPO. cinza = desabilitado · verde = livre · âmbar = ocupado. Cuidado: com mais de 1, dois especialistas podem mexer no mesmo repo ao mesmo tempo — e cada slot é uma sessão consumindo a máquina.">slots: <span id="slotBtns"></span></span>
-    <span>bus root: <b id="busRoot">…</b></span>
-    <span>now: <b id="now">…</b></span>
+    <span class="meta-root">bus root: <b id="busRoot">…</b></span>
+    <span class="meta-now">now: <b id="now">…</b></span>
     <span class="src" id="src">…</span>
   </div>
-  <div id="lockbar" class="lockbar free">🔓 lock livre</div>
 </header>
 
 <main>
@@ -552,7 +565,6 @@ function setSource(mode) {
   const el = document.getElementById("src");
   el.className = "src " + mode;
   el.textContent = mode === "live" ? "LIVE" : (mode === "mock" ? "MOCK DATA" : (mode === "connecting" ? "CONECTANDO…" : "BACKEND DOWN"));
-  document.getElementById("pulse").classList.toggle("on", mode !== "down");
 }
 
 function esc(s) {
@@ -764,16 +776,20 @@ function renderHolder(holders, slots) {
   const ocup = cap > 1 ? ' <span class="lk-cap">' + list.length + '/' + cap + '</span>' : '';
   if (list.length) {
     bar.className = "lockbar busy";
-    // Cada holder é um bloco que NÃO quebra por dentro ("dev-frontend · ~55m" fica inteiro);
-    // a quebra só acontece ENTRE holders, quando não cabem na linha.
-    bar.innerHTML = '<span class="hammer">🔨</span> ' + list.map(h => {
+    // Tudo o que pode ficar longo vai DENTRO do .lk-text -- é ele que corta com reticências
+    // quando a linha aperta. O "!" fica fora, senão o corte levaria o balão junto.
+    const txt = '<span class="hammer">🔨</span> ' + list.map(h => {
       const remMin = h.expiry ? Math.max(0, Math.round((new Date(h.expiry).getTime() - Date.now()) / 60000)) : null;
       const lease = (remMin != null) ? ' · <span class="lk-lease">~' + remMin + 'm</span>' : '';
       return '<span class="lk-holder"><span class="lk-slug">' + esc(h.slug) + '</span>' + lease + '</span>';
-    }).join(' <span class="lk-sep">|</span> ') + ocup + ' ' + LOCK_TIP;
+    }).join(' <span class="lk-sep">|</span> ') + ocup;
+    bar.innerHTML = '<span class="lk-text">' + txt + '</span>' + LOCK_TIP;
+    // Cortado ou não, o conteúdo inteiro fica no hover.
+    bar.title = list.map(h => h.slug).join(' | ') + (cap > 1 ? '  (' + list.length + '/' + cap + ' slots)' : '');
   } else {
     bar.className = "lockbar free";
-    bar.innerHTML = '🔓 <span class="lk-free">livre</span>' + ocup + ' ' + LOCK_TIP;
+    bar.innerHTML = '<span class="lk-text">🔓 <span class="lk-free">livre</span>' + ocup + '</span>' + LOCK_TIP;
+    bar.title = '';
   }
   highlightHolderChip();
 }
@@ -787,10 +803,12 @@ function renderHolders(holders) {
   window.__lockHolderSlugs = holders.map(h => h.slug);
   if (holders.length) {
     bar.className = "lockbar busy";
-    bar.innerHTML = '<span class="hammer">🔨</span> <span class="lk-slug">' + holders.length + '</span> ativo' + (holders.length > 1 ? 's' : '') + ' ' + LOCK_TIP;
+    bar.innerHTML = '<span class="lk-text"><span class="hammer">🔨</span> <span class="lk-slug">' + holders.length + '</span> ativo' + (holders.length > 1 ? 's' : '') + '</span>' + LOCK_TIP;
+    bar.title = holders.map(h => (h.project ? h.project + ': ' : '') + h.slug).join(' | ');
   } else {
     bar.className = "lockbar free";
-    bar.innerHTML = '🔓 <span class="lk-free">livre</span> ' + LOCK_TIP;
+    bar.innerHTML = '<span class="lk-text">🔓 <span class="lk-free">livre</span></span>' + LOCK_TIP;
+    bar.title = '';
   }
   highlightHolderChip();
 }
@@ -987,16 +1005,23 @@ function renderPause(state) {
   if (!state || state.all || !state.project) { btn.style.display = "none"; off.style.display = "none"; return; }
   btn.style.display = "";
   btn.dataset.project = state.project;
-  btn.title = "Pausa/retoma SÓ o projeto selecionado (" + state.project + ")";
-  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶ Retomar"; btn.dataset.paused = "1"; }
-  else { btn.className = "pausebtn running"; btn.textContent = "⏸ Pausar"; btn.dataset.paused = "0"; }
+  // SÓ O ÍCONE (o rótulo foi pro title): os dois botões e a lockbar disputam a MESMA linha do
+  // cabeçalho, e "⏸ Pausar"/"⏻ Desativar (5)" custavam ~120px que a lockbar precisa pra caber.
+  // O que o texto dizia continua acessível no hover -- e o estado já vem pela cor.
+  if (state.paused) { btn.className = "pausebtn paused"; btn.textContent = "▶"; btn.dataset.paused = "1"; btn.title = "Retomar o projeto " + state.project + " (hoje pausado: ninguém pega handoff novo)"; }
+  else { btn.className = "pausebtn running"; btn.textContent = "⏸"; btn.dataset.paused = "0"; btn.title = "Pausar SÓ o projeto " + state.project + ": ninguém pega handoff novo; quem já está processando termina o turno"; }
 
   // Desativar: so faz sentido com especialista ATIVO (verde) -- so eles recebem o handoff.
   const green = (state.specialists || []).filter(s => s.status === "green");
   off.style.display = "";
   off.dataset.project = state.project;
   off.dataset.green = green.map(s => s.slug).join(",");
-  off.textContent = "⏻ Desativar" + (green.length ? " (" + green.length + ")" : "");
+  off.textContent = "⏻";
+  // A contagem saiu do rótulo mas NÃO se perde: vai pro title, e o botão desabilitado (nenhum
+  // verde) já diz sozinho que não há ninguém pra desativar.
+  off.title = green.length
+    ? "Desativar o BUS de " + state.project + ": manda os " + green.length + " especialista(s) ATIVO(s) desarmarem o cron e pararem (" + green.map(s => s.slug).join(", ") + "). Quem já está offline não recebe nada."
+    : "Nenhum especialista ativo (verde) em " + state.project + " — não há o que desativar.";
   off.disabled = green.length === 0;
 }
 
