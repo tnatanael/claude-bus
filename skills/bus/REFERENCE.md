@@ -113,6 +113,30 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## O flash de console no Windows: de quem é a culpa (20/08/2026)
+
+O operador via a tela **piscando** e o suspeito natural era o tique do BUS — ele é o que roda o tempo todo. Medição com a frota trabalhando (6 especialistas, `check` em 1 min), contando processos NOVOS numa janela de 30 s:
+
+| processo | novos em 30 s |
+|---|---|
+| `bash.exe` | 306 |
+| `conhost.exe` | 224 |
+| `cygwin-console-helper.exe` | 123 |
+| `powershell.exe` | 22 |
+| **destes, o gate do BUS** | **~3** (≈ 6/min, confere com o `.bus-gate.log`) |
+
+**O tique é ~1% do barulho.** O resto é a **ferramenta Bash** dos especialistas: no Windows ela chama `C:Program FilesGitinash.exe`, que re-executa `usrinash.exe`, e o MSYS2 **emula `fork()` abrindo processo novo** — cada `|`, cada `$( )`, cada volta de laço vira um `bash.exe`. Junto vêm `conhost.exe` e `cygwin-console-helper.exe`, que são janelas de console de verdade.
+
+**O que NÃO resolveu, e por quê medir antes importou.** A ideia óbvia era tirar o PowerShell do hook e apontá-lo pro `bus-gate.sh` — bash já está no caminho de qualquer jeito (o harness roda o hook como `bash -c "powershell ... bus-gate.ps1"`). Medido na mesma máquina: `.ps1` **3,2 s** por execução contra `.sh` **5,5 s**. O gate em bash é *mais lento*, porque ele mesmo forka `sed`/`grep`/`date` — e cada fork é um processo no Windows. Teria piorado o flash **e** a latência.
+
+**O que sobrou como ação real:**
+
+1. **Doutrina de frota** (`~/.claude/CLAUDE.md`): no Windows, ordem de preferência **Read/Grep/Glob/Edit → ferramenta PowerShell → Bash só se não houver equivalente**. É onde estão os 99%. A orientação do modo bypass ("prefira o Bash tool") pressupõe Linux e é explicitamente revogada ali.
+2. **`BUS_TICK_PROMPT` diz "(ferramenta PowerShell)"** e o protocolo repete: os comandos do BUS são `.ps1`, rodá-los por `bash -c` dobra o custo à toa.
+3. **O intervalo do `check`** é o único multiplicador do lado do BUS: em 1 min são ~6 gates/min; em 5 min, ~1,2. É um clique no dashboard.
+
+A lição que vale além deste caso: **o processo mais visível não é o mais frequente.** O tique tinha o perfil do culpado (roda sempre, é do BUS, aparece no log) e respondia por 1%.
+
 ## Agente long-lived: o que sobrevive à compactação (v0.9.8)
 
 Especialista do BUS vive dias. A conversa **não** — compactação e `/clear` apagam. Três camadas, e o que decide qual usar é **o que sobrevive a quê**:

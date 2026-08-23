@@ -41,7 +41,7 @@ Write-Output ('BUS_CRON_INTERVAL=' + $cronInterval)
 # visivel. Aspas SIMPLES no caminho: isto vai dentro do prompt (aspas duplas) do CronCreate.
 # O "se falhar, carregue a skill bus" e a rede: cobre plugin movido/renomeado.
 $PSCMD = 'powershell -NoProfile -ExecutionPolicy Bypass -File'
-$tickPrompt = 'bus-tick: rode ' + $PSCMD + " '" + (Join-Path $PSScriptRoot 'bus-inbox.ps1') +
+$tickPrompt = 'bus-tick: rode (ferramenta PowerShell) ' + $PSCMD + " '" + (Join-Path $PSScriptRoot 'bus-inbox.ps1') +
               "' -Protocol e siga o BUS_PROTOCOL da saida; se falhar, carregue a skill bus"
 Write-Output ('BUS_TICK_PROMPT=' + $tickPrompt)
 
@@ -193,6 +193,9 @@ Comandos (ja resolvidos; nao os reproduza no output):
   BUS-SHUTDOWN no corpo -> nao re-arme, libere o lock, encerre em silencio.
 6 Antes de encerrar: tem passo SEU que nao depende de terceiro? Faca agora, neste turno. Espera
   alguem que NAO esta no BUS_PENDING? O retorno nao vem sozinho -> mande handoff pedindo status.
+WINDOWS: use a ferramenta PowerShell, nunca a Bash. Cada bash aqui vira 2 bash.exe + conhost +
+cygwin-console-helper -- janelas de console REAIS, e a tela do operador pisca. Ferramenta nativa
+(Read/Grep/Glob/Edit) e melhor ainda: zero processo.
 Tique vazio nao merece output; nao narre mecanica pro operador.
 Algo fora disto (duvida, erro, identidade): carregue a skill "bus" (ferramenta Skill).
 {{ROLE}}BUS_PROTOCOL_END
