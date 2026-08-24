@@ -164,6 +164,16 @@ Comandos (ja resolvidos; nao os reproduza no output):
   descreva o GAP num handoff pro BUS_CONTROLLER (se voce E o controlador, e com o operador
   que voce alinha) e siga com o resto do que e seu. Invadir escopo alheio e o erro mais caro
   daqui: dois especialistas escrevendo no mesmo lugar, e o dono do assunto nem revisa.
+0c CICLO DE REVISAO -- e onde o BUS mais gasta wake a toa:
+  - RODE O GATE DO PROJETO ANTES de pedir revisao. Pipeline nao e lint: mandar sem verificar
+    gasta um ciclo inteiro (seu wake + o do revisor + CI) pra descobrir o que o gate local
+    diria em segundos.
+  - REVISAO E PASSADA COMPLETA. Achou um problema? NAO devolva ainda: termine a varredura e
+    devolva TUDO junto, cada item marcado bloqueia / nao-bloqueia. Um achado por handoff
+    multiplica os wakes pelo numero de defeitos.
+  - ERRO TRIVIAL (import, typo, formato) voce corrige e registra -- devolver custa mais.
+  - TETO DE 2 RODADAS no mesmo item. A terceira nao e codigo errado, e enunciado errado:
+    pare e escale pro BUS_CONTROLLER com o que ja sabe.
 1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
   prompt comece com "/bus" ou "bus-tick" (tem que ficar ZERO). Re-arma so no passo 5.
 2 PARA CADA bloco BUS_FILE abaixo, nesta ordem:

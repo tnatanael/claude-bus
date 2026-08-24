@@ -113,6 +113,42 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## Eficiência do ciclo de desenvolvimento: o custo é o WAKE (v0.9.21)
+
+O operador viu o sintoma antes de mim: *"manda handoff, acha erro, retorna, corrige, manda de volta, acha mais erro, roda o pipeline tudo de novo"*. Medi os dois projetos antes de escrever qualquer regra.
+
+**`cl-adv` (1482 handoffs).** O par mais frequente do projeto inteiro é o loop de revisão:
+
+| par | handoffs |
+|---|---|
+| `cl-dev1 → cl-code-revision` | 100 |
+| `cl-code-revision → cl-dev1` | 92 |
+| `cl-infra ↔ cl-code-revision` | 92 |
+
+São **192 handoffs num único par** dev↔revisão — ~13% do tráfego do projeto — e mais 92 no segundo par. Não é o trabalho: é o *vaivém sobre o mesmo trabalho*.
+
+**`rh-proxima` (2772 handoffs).** Por issue, o custo se concentra na cauda:
+
+| issue | handoffs | janela |
+|---|---|---|
+| #48 | 19 | 9,5 h |
+| #53 | 15 | 12,7 h |
+| #29 | 12 | 4,3 h |
+
+E **151 threads** são ida-e-volta entre exatamente **dois** agentes com 3+ handoffs. Na #53, quinze despachos do `po` pro mesmo grupo (arquiteto, dev-backend, dev-frontend, e2e, revisor… e de novo arquiteto ×4).
+
+**Por que isso é caro aqui, e não numa equipe humana:** cada ida-e-volta é um **wake** — sessão acorda, refaz contexto, relê arquivo, roda o pipeline. Um humano lê um comentário em 5 segundos sem "recarregar" nada. Aqui, o custo marginal de *mais um comentário* é aproximadamente o custo de *começar do zero*. Logo a métrica certa não é "quantos tokens por handoff", é **quantos wakes por issue**.
+
+**O que entrou no protocolo (passo `0c`, pago só em wake produtivo):**
+
+1. **Gate do projeto antes da revisão.** Pipeline não é lint. Mandar sem verificar gasta um ciclo inteiro (wake do autor + wake do revisor + CI) pra descobrir o que o gate local diria em segundos.
+2. **Revisão é passada COMPLETA**, com cada achado marcado *bloqueia* / *não bloqueia*. Devolver no primeiro defeito multiplica os wakes pelo número de defeitos — é a origem aritmética do vaivém.
+3. **Erro trivial quem acha corrige.** Devolver custa mais que consertar.
+4. **Teto de 2 rodadas** no mesmo item: a terceira não é código errado, é **enunciado** errado. Escalar é mais barato que insistir.
+5. **Varra a issue inteira antes de codar** e **um handoff por especialista por onda** (esses dois ficaram na doutrina de frota, que é grátis: não são regras de *execução do BUS*, são de método).
+
+**O que deliberadamente NÃO mudou:** nada da mecânica. Sem campo novo no handoff, sem estado novo, sem regra no gate. O ciclo de revisão é política de projeto — o gate é customizado por projeto e continua sendo do projeto. O BUS só passou a **dizer**, no momento em que o agente vai agir, o que custa caro no desenho dele.
+
 ## Lease do lock configurável (v0.9.20)
 
 O lease — por quanto tempo um lock vale sem ninguém renovar — era `60` fixo no `bus-gate`. É o prazo que **destrava um projeto cuja sessão morreu** (app fechado, `/clear`, travamento) sem o operador apagar arquivo na mão, e o valor certo depende do time: turno longo pede folga, teste de fluxo pede prazo curto.

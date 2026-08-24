@@ -127,6 +127,16 @@ A regra tem duas metades:
 
 ⚠️ **Seção `Domínios` vazia = o `0b` não tem o que ler.** Aí cada especialista inventa o próprio recorte e a regra vira decoração. Preencher essa seção no `CLAUDE.md` do projeto é o que faz o `0b` existir de verdade.
 
+### ♻️ Ciclo de revisão — o custo aqui é o WAKE
+
+Cada ida-e-volta acorda duas sessões, refaz contexto e roda o pipeline de novo. Medido em 20/08/2026: no `cl-adv` o par `dev ↔ revisão` responde sozinho por **192 handoffs** (~13% do tráfego); no `rh-proxima`, a issue #48 custou **19 handoffs em 9,5 h**. O `BUS_PROTOCOL` traz isto no passo **0c**, então um wake produtivo já vem com as regras:
+
+- **Gate do projeto ANTES da revisão** — pipeline não é lint.
+- **Revisão é passada COMPLETA**: todos os achados num handoff, cada um *bloqueia* / *não bloqueia*.
+- **Erro trivial quem acha corrige.**
+- **Teto de 2 rodadas** no mesmo item — a 3ª é enunciado errado, escale.
+- **Varra a issue inteira antes de codar** e **um handoff por especialista por onda**.
+
 ### 🔇 `BUS_ROLE` — quem fala com o operador
 
 Os scripts devolvem `BUS_ROLE=` derivado do `.priority` (não é config nova): **controlador** = menor prioridade do projeto; **background** = todos os outros. Sem hierarquia (ninguém abaixo de 1000), não vem papel nenhum e vale a regra de sempre.
