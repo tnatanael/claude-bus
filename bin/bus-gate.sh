@@ -13,7 +13,15 @@
 # Demais partes best-effort no Unix -- validar (parsing JSON via sed assume prompts simples;
 # o lock guarda exp_epoch p/ comparacao numerica e expiry ISO p/ o dashboard).
 SEEN_STALE_MIN=180
-LEASE_MIN=60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
+LEASE_DEFAULT=60   # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
+
+# LEASE em minutos, GLOBAL, marcador <base>/.bus-lease (botao do dashboard). Escada fixa 15..240;
+# fora disso cai no default. Lido A CADA acquire e gravado DENTRO do lock (expiry/exp_epoch):
+# mudar o valor NAO mexe em lock ja de pe -- encurtar nunca rouba turno em voo.
+bus_lease() {
+  v="$(cat "$1/.bus-lease" 2>/dev/null | tr -dc '0-9')"
+  if [ -n "$v" ] && [ "$v" -ge 15 ] 2>/dev/null && [ "$v" -le 240 ] 2>/dev/null; then echo "$v"; else echo "$LEASE_DEFAULT"; fi
+}
 
 # Forense: acquire/steal/defer-race vao pra <base>/.bus-gate.log (best-effort, nunca quebra).
 # (Bash nao tem o fail-open por-excecao do .ps1: aqui um erro nao vira "exit 0 sem lock" -- o
@@ -263,7 +271,7 @@ main() {
   fi
 
   if [ "$mypending" = "1" ]; then   # bare /bus com trabalho -> processa (serializado pelo lock)
-    exp=$(( now + LEASE_MIN * 60 ))
+    exp=$(( now + $(bus_lease "$base") * 60 ))
     iso_now="$(date -d "@$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$now" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$now")"
     iso_exp="$(date -d "@$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date -r "$exp" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$exp")"
     obj="{\"sid\":\"$sid\",\"slug\":\"$slug\",\"project\":\"$project\",\"since\":\"$iso_now\",\"expiry\":\"$iso_exp\",\"exp_epoch\":$exp}"

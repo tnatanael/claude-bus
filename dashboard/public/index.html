@@ -455,6 +455,7 @@
   </span>
   <div class="meta">
     <span class="cron-cfg" title="Intervalo do auto-recheck (cron */N min, 1–30). Grava no BUS; cada especialista pega no próximo /bus (~1 ciclo, não é instantâneo).">check: <button class="cron-step" id="cronDec" type="button">−</button><b id="cronVal">5</b>m<button class="cron-step" id="cronInc" type="button">+</button></span>
+    <span class="cron-cfg" title="Validade do lock (lease, em minutos). Passado esse prazo sem ninguém renovar, qualquer especialista pode roubar o lock — é o que destrava um projeto cuja sessão morreu (app fechado, /clear, travamento) sem você apagar arquivo na mão. Vale só para locks NOVOS: quem já está segurando um mantém o prazo com que começou, então encurtar nunca rouba um turno em voo. Curto demais = risco de dois especialistas no mesmo repo se um turno passar do prazo; longo demais = projeto travado por mais tempo quando uma sessão morre.">lease: <button class="cron-step" id="leaseDec" type="button">−</button><b id="leaseVal">60</b>m<button class="cron-step" id="leaseInc" type="button">+</button></span>
     <span class="meta-root">bus root: <b id="busRoot">…</b></span>
     <span class="meta-now">now: <b id="now">…</b></span>
     <span class="src" id="src">…</span>
@@ -1037,6 +1038,7 @@ function renderPause(state) {
 function render(state) {
   document.getElementById("now").textContent = fmtClock(state.now);
   syncCronInterval(state.cronInterval);
+  syncLease(state.lease);
   syncSlots(state);
   noteHolderMRU(state.holder);   // atualiza o MRU antes de desenhar os chips
   renderPause(state);
@@ -1196,6 +1198,34 @@ function bumpCronInterval(delta) {
 }
 document.getElementById("cronDec").addEventListener("click", () => bumpCronInterval(-1));
 document.getElementById("cronInc").addEventListener("click", () => bumpCronInterval(+1));
+
+// LEASE do lock. Mesma mecanica do "check" (lock de edicao + debounce do POST), com uma
+// diferenca: os passos sao uma ESCADA, nao +/-1. De 15 a 240 de um em um seriam 47 cliques pra
+// atravessar a faixa; a escada cobre a faixa util em 7 passos. O valor so vale pros locks NOVOS
+// (o gate grava o expiry no acquire), entao mudar aqui nunca encurta o turno de quem ja esta
+// trabalhando -- e por isso o efeito nao aparece na barra de lock na hora.
+const LEASE_LADDER = [15, 30, 45, 60, 90, 120, 180, 240];
+let leaseVal = 60, leaseEditUntil = 0, leasePostTimer = null;
+function applyLease(n) { leaseVal = n; const v = document.getElementById("leaseVal"); if (v) v.textContent = n; }
+function syncLease(n) {   // chamado pelo poll -- so aceita fora da edicao
+  if (typeof n !== "number" || !LEASE_LADDER.includes(n)) return;
+  if (Date.now() < leaseEditUntil) return;
+  applyLease(n);
+}
+function bumpLease(dir) {
+  const i = LEASE_LADDER.indexOf(leaseVal);
+  const j = Math.max(0, Math.min(LEASE_LADDER.length - 1, (i < 0 ? 3 : i) + dir));
+  if (LEASE_LADDER[j] === leaseVal) return;
+  applyLease(LEASE_LADDER[j]);
+  leaseEditUntil = Date.now() + 1500;
+  clearTimeout(leasePostTimer);
+  leasePostTimer = setTimeout(async () => {
+    try { await fetch("/api/lease", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minutes: leaseVal }) }); } catch (_) {}
+    leaseEditUntil = Date.now() + 800;
+  }, 450);
+}
+document.getElementById("leaseDec").addEventListener("click", () => bumpLease(-1));
+document.getElementById("leaseInc").addEventListener("click", () => bumpLease(+1));
 
 // SLOTS de lock: 3 botões, um por slot. cinza = desabilitado · verde = habilitado e livre ·
 // âmbar = ocupado agora. Clicar num CINZA habilita até ali; clicar num habilitado desabilita

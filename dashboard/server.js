@@ -459,6 +459,22 @@ function readCronInterval() {
   return CRON_INTERVAL_DEFAULT;
 }
 
+// LEASE do lock (GLOBAL, marcador <base>/.bus-lease, minutos). E por quanto tempo um lock vale
+// sem ninguem renovar: passou disso, qualquer um pode roubar. Serve pra destravar projeto cuja
+// sessao morreu (app fechado, /clear, travamento) sem o operador apagar arquivo na mao.
+// Quem GRAVA o valor no lock e o GATE, no acquire -- entao mudar aqui so vale pros locks NOVOS;
+// os que ja estao de pe mantem o expiry com que nasceram. E proposital: nao encurtar debaixo de
+// quem esta trabalhando agora. Escada fixa (nao passo livre) pra o +/- nao virar 47 cliques.
+const LEASE_LADDER = [15, 30, 45, 60, 90, 120, 180, 240];
+const LEASE_DEFAULT = 60;
+function readLease() {
+  try {
+    const n = parseInt((safeReadText(path.join(BUS_ROOT, '.bus-lease')) || '').trim(), 10);
+    if (Number.isFinite(n) && n >= LEASE_LADDER[0] && n <= LEASE_LADDER[LEASE_LADDER.length - 1]) return n;
+  } catch (_) {}
+  return LEASE_DEFAULT;
+}
+
 // holder do lock daquele projeto = trabalhando AGORA -> status verde (sobrepoe o seen "velho"
 // de um turno longo; trabalhando e o oposto de offline). Roda ANTES do attachToCron pra o
 // destino working nao virar "offline" (X vermelho) num card do inbox.
@@ -481,7 +497,7 @@ function buildPayload(p) {
       attachToCron(st.handoffs, roster[name] || [], projectRoot(name));
       return { project: name, specialists: roster[name] || [], handoffs: st.handoffs, counts: st.counts, holder, slotHolders, slots: readSlots(projectRoot(name)), paused: readPaused(projectRoot(name)) };
     });
-    return { now, all: true, projects, holders: projects.flatMap(pr => pr.slotHolders || []), cronInterval };
+    return { now, all: true, projects, holders: projects.flatMap(pr => pr.slotHolders || []), cronInterval, lease: readLease() };
   }
   const st = buildState(projectRoot(p));
   st.project = p;
@@ -493,6 +509,7 @@ function buildPayload(p) {
   attachToCron(st.handoffs, roster[p] || [], projectRoot(p));
   st.paused = readPaused(projectRoot(p));
   st.cronInterval = cronInterval;
+  st.lease = readLease();
   return st;
 }
 
@@ -772,6 +789,30 @@ const server = http.createServer((req, res) => {
         }
         fs.writeFileSync(path.join(BUS_ROOT, '.bus-cron-interval'), String(n));
         sendJson(res, { cronInterval: n });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+    });
+    return;
+  }
+
+  // Config do LEASE do lock (GLOBAL, minutos). So vale pros locks NOVOS: o expiry e gravado pelo
+  // gate no acquire, entao quem ja esta segurando um lock mantem o prazo com que ele nasceu --
+  // encurtar o lease NAO pode roubar o lock de quem esta trabalhando agora.
+  if (req.method === 'POST' && urlPath === '/api/lease') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const n = parseInt(JSON.parse(body || '{}').minutes, 10);
+        if (!Number.isFinite(n) || !LEASE_LADDER.includes(n)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'minutes must be one of ' + LEASE_LADDER.join(',') }));
+          return;
+        }
+        fs.writeFileSync(path.join(BUS_ROOT, '.bus-lease'), String(n));
+        sendJson(res, { lease: n });
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: String(e) }));

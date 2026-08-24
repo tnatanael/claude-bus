@@ -25,7 +25,19 @@
 # permanente com a linha de comando) nem volte o prompt do cron pra "/bus".
 
 $SEEN_STALE_MIN = 180     # >3h sem rodar -> deixa passar pro modelo re-armar
-$LEASE_MIN      = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
+$LEASE_DEFAULT  = 60      # auto-libera o lock se a sessao travar/cair (o dashboard mostra o restante)
+
+function Get-BusLease([string]$base) {
+  # LEASE em minutos, GLOBAL, marcador <base>/.bus-lease (botao do dashboard). Escada fixa
+  # 15..240; qualquer coisa fora disso cai no default. Lido A CADA acquire e gravado DENTRO do
+  # lock (campo expiry): mudar o valor nao mexe em lock que ja esta de pe -- quem esta
+  # trabalhando agora mantem o prazo com que comecou. Encurtar o lease nunca rouba turno em voo.
+  try {
+    $v = 0
+    if ([int]::TryParse((Get-Content -LiteralPath (Join-Path $base '.bus-lease') -Raw -ErrorAction Stop).Trim(), [ref]$v) -and $v -ge 15 -and $v -le 240) { return $v }
+  } catch {}
+  return $LEASE_DEFAULT
+}
 
 function BusBlock([string]$msg) {
   # BLOQUEIA o prompt. As 3 variantes bloqueiam igual (o modelo NAO acorda), MAS elas diferem
@@ -369,7 +381,8 @@ try {
 
   if ($myPending) {   # bare /bus com trabalho -> processa (serializado pelo lock)
     # acquire: cria exclusivo; se ja existe e e MEU ou EXPIRADO, sobrescreve (steal).
-    $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
+    $leaseMin = Get-BusLease $base
+    $obj = (@{ sid=$sid; slug=$slug; project=$project; since=$now.ToString('o'); expiry=$now.AddMinutes($leaseMin).ToString('o') } | ConvertTo-Json -Compress)
     $enc = New-Object System.Text.UTF8Encoding($false)
     $acquired = $false; $how = 'acquire'
     # Percorre os slots ate conseguir um. CreateNew e test-and-set ATOMICO: dois especialistas
@@ -412,7 +425,7 @@ try {
     if ($prompt -match '(?im)^\s*/bus(\s|$)' -and $sid) {
       $lockRoot2 = if ($project -and $project -ne 'default') { Join-Path $base2 $project } else { $base2 }
       $lf = Join-Path $lockRoot2 '.bus-lock'; $nw = [datetimeoffset]::Now
-      $obj2 = (@{ sid=$sid; slug=$slug; project=$project; since=$nw.ToString('o'); expiry=$nw.AddMinutes($LEASE_MIN).ToString('o') } | ConvertTo-Json -Compress)
+      $obj2 = (@{ sid=$sid; slug=$slug; project=$project; since=$nw.ToString('o'); expiry=$nw.AddMinutes((Get-BusLease $base2)).ToString('o') } | ConvertTo-Json -Compress)
       $enc2 = New-Object System.Text.UTF8Encoding($false); $got = $false
       try {
         $fx = [System.IO.File]::Open($lf, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
