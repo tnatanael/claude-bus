@@ -113,6 +113,17 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## Tarefa pendurada mata o tique (v0.9.22)
+
+O tique do BUS é o harness **re-invocando a sessão**, e ele só entra quando a sessão está **ociosa**. Enquanto um comando está rodando em foreground, ou enquanto uma tarefa de fundo continua viva, o cron não dispara — a sessão simplesmente **para de aparecer no BUS**, sem erro, sem log, sem nada no dashboard além de um especialista que ficou quieto.
+
+Medido em 20/08/2026 no `rh-proxima`: a sessão `po`, a única que segurava um monitor de fundo, rodou **1 tique o dia inteiro**; os pares rodaram de **99 a 235**. Foi o que motivou trocar a vigia do `bus-git-watch` de monitor pendurado por **cron horário de passada única** (v0.9.18).
+
+O que faltava era generalizar. A doutrina estava só na skill do `bus-git-watch` — quem nunca invocou `/bus-git-watch` nunca a leu, e o caso real que reabriu o assunto não tinha nada a ver com git: era um `ssh` sem `-o ConnectTimeout`, esperando para sempre uma máquina que não respondia. Vale para qualquer comando que **sai da máquina** — `ssh`, `gh`, `curl`, suíte de teste, deploy.
+
+Por isso a regra virou **passo `0d` do protocolo** (impresso junto com o resto, custo zero em tique ocioso) e um bullet no passo 3 do `SKILL.md`: **timeout explícito em tudo que sai da máquina; nada de foreground longo, laço `for`+`sleep` ou espera sem prazo.** Precisa mesmo de algo longo? Dispare em background, **encerre o wake já** (re-armar cron + liberar lock) e feche quando a tarefa reacordar a sessão — o que o passo 3 do `SKILL.md` já mandava fazer pelo lock, e agora manda também pelo tique.
+
+⚠️ Nada disso é mecânica nova: o gate, o lock e o cron não mudaram. É o agente que precisa parar de se auto-sabotar durante o próprio wake — e o modo de falha é silencioso, que é o que o torna caro.
 ## Eficiência do ciclo de desenvolvimento: o custo é o WAKE (v0.9.21)
 
 O operador viu o sintoma antes de mim: *"manda handoff, acha erro, retorna, corrige, manda de volta, acha mais erro, roda o pipeline tudo de novo"*. Medi os dois projetos antes de escrever qualquer regra.

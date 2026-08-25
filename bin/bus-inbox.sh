@@ -59,7 +59,12 @@ Comandos (ja resolvidos; nao os reproduza no output):
   - ERRO TRIVIAL (import, typo, formato) voce corrige e registra -- devolver custa mais.
   - TETO DE 2 RODADAS no mesmo item. A terceira nao e codigo errado, e enunciado errado:
     pare e escale pro BUS_CONTROLLER com o que ja sabe.
-1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
+0d PRAZO -- tarefa pendurada MATA o seu tique. O BUS so entra em sessao ociosa: enquanto um
+  comando roda ou uma tarefa de fundo segue viva, o tique NAO chega e voce SOME do bus sem
+  erro nenhum (medido: 1 tique no dia inteiro contra 99-235 dos pares). Todo comando que sai
+  da maquina (ssh, gh, curl, suite de teste, deploy) vai com TIMEOUT EXPLICITO. Nada de
+  foreground longo, nada de laco for+sleep, nada de espera sem prazo. Precisa mesmo de algo
+  longo? Dispare em background, encerre o wake JA (passo 5) e feche quando ela te reacordar.1 CRON OFF: ToolSearch "select:CronList,CronCreate,CronDelete" -> CronDelete em TODO job cujo
   prompt comece com "/bus" ou "bus-tick" (tem que ficar ZERO). Re-arma so no passo 5.
 2 PARA CADA bloco BUS_FILE abaixo, nesta ordem:
   a) mova o arquivo de /inbox/ para /processing/ (claim atomico)
