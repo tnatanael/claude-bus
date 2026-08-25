@@ -113,6 +113,38 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## `seen/<sid>` não mede o tique — e o dashboard herda o erro (v0.9.24)
+
+Em 25/08/2026, investigando por que um especialista sumia do BUS, eu afirmei que `seen/<sid>` é a prova incondicional de que **o gate rodou** — citando `bus-gate.ps1:214`, que grava antes de qualquer decisão. **A linha está certa e a inferência estava errada.** `seen/<sid>` tem **três escritores**:
+
+| escritor | quando |
+|---|---|
+| `bus-gate.ps1:214` / `.sh:138` | a cada tique que passa pelo hook |
+| `bus-inbox.ps1:76` / `.sh:152` | a cada leitura de inbox |
+| `bus-name.ps1:40` | a cada **resolução de identidade** |
+
+Ou seja: `seen` mede **"algum script do BUS rodou sob este sid"**, nunca "o cron disparou".
+
+**O efeito foi literal e vale guardar:** o `seen` do especialista em questão estava fresco **porque ele rodou `bus-name` pra conferir a acusação de que estava morto**. *O ato de medir escreveu o dado que a medição ia ler.*
+
+**Consequência direta na tela:** o dashboard deriva o "online" desse mtime. Então **ONLINE significa "alguém rodou algum script do BUS", não "esta sessão está sendo acordada"** — e isso vale sempre, com ou sem registro órfão. Foi exatamente por isso que um especialista apareceu online durante horas em que ninguém sabia se o cron dele disparava.
+
+⚠️ **Não construa detector de vida do tique em cima de `seen`.** Ele vai responder "vivo" toda vez que alguém for investigar. O sinal honesto precisa de um carimbo **escrito só pelo gate** (ou distinguível por origem) — hoje **não existe**, e é o item aberto.
+
+### O padrão que o incidente inteiro repetiu
+
+Quatro instrumentos, quatro conclusões, zero causas confirmadas:
+
+| quem | instrumento | conclusão | por que falhou |
+|---|---|---|---|
+| especialista | transcript da sessão | "o cron não dispara" | coleta **depois** do gate |
+| eu | `.bus-gate.log` | "é defer por lock" | o log só grava **contenção**, não vida |
+| revisor | o mesmo log, conferindo | "a ausência é real" | inbox vazia sai sem escrever linha |
+| revisor | `seen/` | "registro órfão" | três escritores, um deles a própria conferência |
+
+**A forma é sempre a mesma: o registro consultado é escrito por um caminho diferente daquele que a pergunta investigava.** A pergunta que teria matado os quatro, e que é a lição real: *este registro é escrito SEMPRE, ou só em alguns caminhos?* — feita **em voz alta antes de citar o número**, porque os quatro sabiam a regra e erraram assim mesmo.
+
+E a formulação que sobrou de pé, do próprio especialista acusado: **registro não é cron.** Estar em `names/` e o `CronList` listar o job não prova disparo — listagem não é disparo.
 ## `SendMessage` NÃO substitui o tique — testado (v0.9.23)
 
 O `SendMessage` é ferramenta do **harness** (Claude Code/Desktop), não do BUS: manda texto direto pra outra **sessão viva** da máquina, listada pelo `ListAgents`. Em 25/08/2026 um especialista passou a usá-lo como mecanismo de wake e registrou isso como decisão operacional, com a hipótese de que o BUS poderia então dispensar cron e espera: o especialista escreveria o handoff e cutucaria o destino.
@@ -138,7 +170,7 @@ Mais dois riscos: o `ListAgents` mostra as sessões de **todos os projetos** jun
 
 **Só existe um: disparar `/bus-reload` num agente ocioso.** Nada mais. Não é transporte, não é aviso de handoff, não é decisão — o handoff continua indo por `bus-send`, e o registro por issue.
 
-O caso canônico é o **registro órfão**: depois de um `/clear`/restart a sessão ganha sid novo, deixa de estar em `names/`, fica sem cron e **nunca mais gateia**. Sintoma exato: `seen/<sid-vivo>` não existe, o `seen/<sid-antigo>` congela — e o dashboard ainda mostra o especialista **online**, porque o sid antigo continuava sendo refrescado. A auto-cura da v0.7.8 cobre o **lock** órfão, não o **registro**.
+O caso canônico é o **registro órfão**: depois de um `/clear`/restart a sessão ganha sid novo, deixa de estar em `names/`, fica sem cron e **nunca mais gateia**. A auto-cura da v0.7.8 cobre o **lock** órfão, não o **registro**. ⚠️ O teste é o `bus-name` devolver `NONE` — **não** o estado do `seen/`, que tem três escritores e não mede o tique (seção abaixo).
 
 Cutuque com **`/bus-reload`** e pare por aí: o próprio `/bus-reload` diagnostica e destrava (identidade, tarefa pendurada, lock órfão, cron phantom, pausa) — quem sabe o que está travado é a sessão travada, não quem cutuca.
 
