@@ -620,9 +620,12 @@ function idToEpoch(id) {
 }
 
 function handoffCard(it, idSet, proj, cancelable) {
-  // Handoff do operador (via /bus-message) ainda no inbox -> botao de cancelar.
-  const cancelBtn = (cancelable && it.from === "operador")
-    ? `<button class="cancel-op" title="Cancelar esta mensagem do operador (remove do inbox)">✕</button>`
+  // Botao de remover: QUALQUER handoff ainda no inbox (era so from-operador ate a v0.9.25).
+  // So no inbox de proposito -- o que ja esta em processing/ foi reivindicado por alguem.
+  const cancelBtn = cancelable
+    ? `<button class="cancel-op" title="${it.from === "operador"
+        ? "Cancelar esta mensagem do operador (remove do inbox)"
+        : "Remover este handoff do inbox — " + esc(it.to) + " nunca vai recebê-lo"}">✕</button>`
     : "";
   const replyTag = it.replyRequired ? '<span class="tag reply">reply required</span>' : "";
   const parentPresent = it.inReplyTo && idSet && idSet.has(it.inReplyTo);
@@ -660,7 +663,7 @@ function handoffCard(it, idSet, proj, cancelable) {
     ? `<span class="prio ghost" title="${esc(it.to)} não está registrado no BUS deste projeto — não tem prioridade (a prioridade é do especialista, não do nome)">sem registro</span>`
     : `<span class="prio ${prioCls}" title="prioridade do destino ${esc(it.to)}: ${tp} (default 1000 — menor cede a vez, maior fura a fila)">${prioArrow}${tp}</span>`;
   return `
-    <div class="handoff${linkable}${destOffline ? " has-offline" : ""}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}">
+    <div class="handoff${linkable}${destOffline ? " has-offline" : ""}" data-id="${esc(it.id)}" data-reply-to="${replyTo}" data-project="${esc(proj || "")}" data-from="${esc(it.from)}" data-to="${esc(it.to)}">
       ${cancelBtn}${offlineX}
       <div class="route">
         <span class="from">${esc(it.from)}</span>
@@ -704,11 +707,15 @@ function specsHtml(specs) {
   }).join("");
 }
 
-// Inbox ordenada por PRIORIDADE do destino (primaria, maior em cima = processa antes;
-// PO/low-prio afunda) e, dentro da mesma prioridade, por TEMPO DE ESPERA (mais antigo no topo).
+// Inbox ordenada por: FYI no fim (nao acorda ninguem -- nao e fila de trabalho, e recado
+// esperando carona no proximo wake do destino; ficar no topo dava impressao de trabalho
+// parado que nao existe), depois PRIORIDADE do destino (maior em cima = processa antes;
+// PO/low-prio afunda) e, dentro da mesma prioridade, TEMPO DE ESPERA (mais antigo no topo).
 function sortInboxByWait(items) {
   const p = it => (it.toPrio == null ? 1000 : it.toPrio);
-  return (items || []).slice().sort((a, b) => (p(b) - p(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const f = it => (it.fyi ? 1 : 0);
+  return (items || []).slice().sort((a, b) =>
+    (f(a) - f(b)) || (p(b) - p(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 // O cron de auto-recheck dispara a cada 5 min (:00,:05,:10,...). O card do inbox mostra:
@@ -829,7 +836,8 @@ function renderAll(projects) {
   if (!projects || !projects.length) { wrap.innerHTML = '<div class="empty">nenhum projeto</div>'; return; }
   const col = (title, items, cls, proj) => {
     const n = (items || []).length;
-    const body = n ? items.map(it => handoffCard(it, null, proj)).join("") : '<div class="empty">vazio</div>';
+    // cancelable so no inbox, igual a visao de projeto unico (renderColumn).
+    const body = n ? items.map(it => handoffCard(it, null, proj, cls === "inbox")).join("") : '<div class="empty">vazio</div>';
     return `<div class="column ${cls}"><h3>${title} <span class="count">${n}</span></h3>${body}</div>`;
   };
   wrap.innerHTML = projects.map(p => {
@@ -1389,8 +1397,11 @@ document.getElementById("modalClose").addEventListener("click", closeModal);
 document.getElementById("modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
 document.getElementById("threadList").addEventListener("click", e => { const t = e.target.closest(".thread-item[data-id]"); if (t) showThreadDetail(t.getAttribute("data-id")); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
-async function cancelOpMessage(proj, id) {
-  if (!confirm("Cancelar esta mensagem do operador? Ela será removida do inbox antes de ser processada.")) return;
+async function cancelOpMessage(proj, id, from, to) {
+  const msg = (from === "operador")
+    ? "Cancelar esta mensagem do operador? Ela será removida do inbox antes de ser processada."
+    : `Remover o handoff ${from} → ${to}?\n\nEle sai do inbox e ${to} NUNCA vai recebê-lo. ${from} não é avisado e pode ficar esperando resposta. Isto não tem desfazer.`;
+  if (!confirm(msg)) return;
   try {
     await fetch("/api/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: proj, id }) });
   } catch (_) {}
@@ -1401,10 +1412,10 @@ function onCardClick(e) {
   if (!card) return;
   const proj = card.getAttribute("data-project") || selectedProject;
   if (!proj || proj === "all") return;
-  // botao de cancelar (mensagem do operador no inbox) -> NAO abre o modal
+  // botao de remover (qualquer handoff do inbox) -> NAO abre o modal
   if (e.target.closest(".cancel-op")) {
     e.stopPropagation();
-    cancelOpMessage(proj, card.getAttribute("data-id"));
+    cancelOpMessage(proj, card.getAttribute("data-id"), card.getAttribute("data-from"), card.getAttribute("data-to"));
     return;
   }
   openModal(proj, card.getAttribute("data-id"));

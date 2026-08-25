@@ -14,7 +14,10 @@
  *   1. POST /api/pause    -> toggles the <projeto>/.bus-paused marker (nothing else).
  *   2. POST /api/shutdown -> writes ONE operador->slug handoff per ACTIVE (green)
  *      specialist of the project, telling it to disarm its cron and stand down.
- * It never moves, modifies, or deletes existing handoffs. Everything else is fs reads.
+ *   3. POST /api/cancel   -> deletes ONE handoff from <projeto>/inbox (any sender, since
+ *      v0.9.25). Never touches processing/done/rejected: a claimed handoff stays claimed.
+ * It never MOVES or MODIFIES a handoff -- the only write on an existing one is the delete
+ * in (3), and only while it is still in the inbox. Everything else is fs reads.
  */
 
 const http = require('http');
@@ -740,9 +743,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Cancela um handoff do OPERADOR (via /bus-message) que ainda esta no INBOX -- caso o
-  // operador mude de ideia. Guardrails: so from-operador, so no inbox (nao mexe em trabalho
-  // de especialista nem no que ja foi pra processing/done), project+id validados (sem traversal).
+  // Remove um handoff que ainda esta no INBOX. Ate a v0.9.25 so aceitava from-operador (era
+  // "cancelar o /bus-message que eu mandei"); agora aceita QUALQUER remetente -- o operador
+  // pediu poder tirar handoff errado/obsoleto de qualquer par sem editar o %TEMP% na mao.
+  // Guardrails que FICAM: so o inbox (o que ja esta em processing/ foi reivindicado por
+  // alguem e mexer ali quebraria o claim), project+id validados (sem traversal), e a UI
+  // confirma avisando que o destino nunca vera o handoff e o remetente nao e notificado.
   if (req.method === 'POST' && urlPath === '/api/cancel') {
     let body = '';
     req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
@@ -760,7 +766,7 @@ const server = http.createServer((req, res) => {
         let deleted = null;
         for (const f of (safeReaddir(inbox) || [])) {
           const parsed = parseHandoffFilename(f);
-          if (parsed && parsed.id === id && parsed.from === 'operador') {
+          if (parsed && parsed.id === id) {
             try { fs.unlinkSync(path.join(inbox, f)); deleted = f; } catch (_) {}
             break;
           }
