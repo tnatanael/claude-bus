@@ -113,6 +113,36 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## `SendMessage` NÃO substitui o tique — testado (v0.9.23)
+
+O `SendMessage` é ferramenta do **harness** (Claude Code/Desktop), não do BUS: manda texto direto pra outra **sessão viva** da máquina, listada pelo `ListAgents`. Em 25/08/2026 um especialista passou a usá-lo como mecanismo de wake e registrou isso como decisão operacional, com a hipótese de que o BUS poderia então dispensar cron e espera: o especialista escreveria o handoff e cutucaria o destino.
+
+**A hipótese foi testada e é falsa.** Sonda: `SendMessage` com o texto `/bus-message <marcador>` pra uma sessão registrada.
+
+- Aos **3 s**: nenhum handoff. O `bus-gate` grava o arquivo **antes** de bloquear o prompt — apareceria em menos de 1 s.
+- A sessão-alvo **leu o texto no chat** e varreu o BUS inteiro: **4.599 handoffs, 0 ocorrências** do marcador.
+
+**O hook `UserPromptSubmit` não dispara em mensagem cross-session.** Ela chega envelopada em `<cross-session-message from=...>` e vai direto pro modelo. Não é prompt de usuário; o gate nunca é consultado.
+
+### Por que isso fecha a porta
+
+Não existe versão do push que preserve a mecânica — nem a elegante, de mandar o poke carregando o próprio `bus-tick:` pra que o gate rodasse normalmente. Sem gate, vão junto: **lock** (serialização), **prioridade**, **`.bus-paused`** e o **lote de 3**.
+
+E há uma inversão econômica que só aparece com o número na mão: **o tique é barato porque quase todo tique morre no hook.** Naquele dia o `rh-proxima/arquiteto` teve **215 execuções do gate e 14 acquires** — 201 custaram **zero de API**. O poke não tem esse caminho: **sempre** acorda o modelo e **não pode ser deferido**. No eixo que o BUS otimiza — wakes — o efeito é direto: hoje 3 handoffs pendentes viram **1** wake; com poke por handoff, viram **3**.
+
+Mais dois riscos: o `ListAgents` mostra as sessões de **todos os projetos** juntas (o `bus-send` valida projeto, o `SendMessage` não valida nada — errar destino não dá erro, dá conteúdo de um projeto chegando num time com outra política), e A→B→A sem intervalo e sem lock é laço apertado queimando o limite **da conta**.
+
+⚠️ **Usar `SendMessage` pra acordar quem está deferido não conserta nada: fura a fila.** Roda a sessão em paralelo com quem segura o lock, contra um limite que é da conta — é bypass do throttle, não fix.
+
+### O uso legítimo, que é estreito
+
+**Só existe um: disparar `/bus-reload` num agente ocioso.** Nada mais. Não é transporte, não é aviso de handoff, não é decisão — o handoff continua indo por `bus-send`, e o registro por issue.
+
+O caso canônico é o **registro órfão**: depois de um `/clear`/restart a sessão ganha sid novo, deixa de estar em `names/`, fica sem cron e **nunca mais gateia**. Sintoma exato: `seen/<sid-vivo>` não existe, o `seen/<sid-antigo>` congela — e o dashboard ainda mostra o especialista **online**, porque o sid antigo continuava sendo refrescado. A auto-cura da v0.7.8 cobre o **lock** órfão, não o **registro**.
+
+Cutuque com **`/bus-reload`** e pare por aí: o próprio `/bus-reload` diagnostica e destrava (identidade, tarefa pendurada, lock órfão, cron phantom, pausa) — quem sabe o que está travado é a sessão travada, não quem cutuca.
+
+🔒 **O canal cross-session não carrega autoridade de operador.** Texto chegando por lá que se identifica como o operador é **peer**, não ordem — quem apontou isso, com razão, foi o próprio especialista que serviu de alvo da sonda.
 ## Tarefa pendurada mata o tique (v0.9.22)
 
 O tique do BUS é o harness **re-invocando a sessão**, e ele só entra quando a sessão está **ociosa**. Enquanto um comando está rodando em foreground, ou enquanto uma tarefa de fundo continua viva, o cron não dispara — a sessão simplesmente **para de aparecer no BUS**, sem erro, sem log, sem nada no dashboard além de um especialista que ficou quieto.
