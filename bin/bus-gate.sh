@@ -233,10 +233,17 @@ main() {
     for f in "$inbox"/to-*.handoff; do
       [ -e "$f" ] || continue
       grep -q '###BUS-END' "$f" 2>/dev/null || continue
+      fm=$(date -r "$f" +%s 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+      agemin=$(( (now - fm) / 60 ))
       if grep -qE '^kind:[[:space:]]*fyi[[:space:]]*$' "$f" 2>/dev/null; then
-        fm=$(date -r "$f" +%s 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
-        [ $(( (now - fm) / 60 )) -lt "$FYI_WAKE_MIN" ] && continue
+        [ "$agemin" -lt "$FYI_WAKE_MIN" ] && continue
       fi
+      # not_before_min: handoff AGENDADO -- invisivel ate vencer o prazo (nao e pendencia do
+      # destino nem motivo pra alguem ceder a vez). Mesma mecanica do fyi: prazo contado do
+      # mtime, que nunca muda (handoff e imutavel; mover entre pastas preserva o mtime).
+      # Existe pro self-handoff de ESPERA parar de virar poller de 1 wake por minuto.
+      nb=$(sed -n 's/^not_before_min:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$f" 2>/dev/null | head -1)
+      [ -n "$nb" ] && [ "$agemin" -lt "$nb" ] && continue
       bn="$(basename "$f")"; toslug="${bn#to-}"; toslug="${toslug%%__*}"   # entre 'to-' e o 1o '__'
       if [ "$toslug" = "$slug" ]; then mypending=1
       elif [ -n "$toslug" ]; then

@@ -263,6 +263,10 @@ foreach ($hit in $hits) {
   # Entrega SO o que o modelo precisa: quem enviou (from), o id (p/ -InReplyTo), se pede
   # retorno, e o CORPO ja limpo. Descarta auth (token/ruido), o "to" (e voce) e os
   # marcadores ###BUS-START/END -> menos tokens de contexto por leitura, parsing trivial.
+  # not_before_min: handoff AGENDADO -- nao entrega antes de vencer o prazo. Tem que casar com
+  # a regra do gate (mesmo mtime, mesmo numero), senao o gate acorda e o leitor devolve vazio.
+  if (($header -match '(?m)^not_before_min:\s*(\d+)\s*$') -and
+      (((Get-Date) - $hit.LastWriteTime).TotalMinutes -lt [double]$matches[1])) { continue }
   # Sem 'kind:' = task (handoff antigo, anterior ao fyi -- default seguro: acorda).
   $isFyi = ($header -match '(?m)^kind:\s*fyi\s*$')
   if ($isFyi) { if ($fyiFound -ge $MaxFyi) { $fyiMore++; continue } }
@@ -325,10 +329,15 @@ foreach ($h in (Get-ChildItem -LiteralPath $inbox -File -Filter 'to-*.handoff' -
   if (-not ($h.Name -match '^to-(.+?)__')) { continue }
   $d = $matches[1]
   if ($pend.ContainsKey($d)) { continue }   # ja listado: nao paga leitura de novo
-  if (((Get-Date) - $h.LastWriteTime).TotalMinutes -lt $FYI_WAKE_MIN) {
+  $hAge = ((Get-Date) - $h.LastWriteTime).TotalMinutes
+  $ht = $null
+  if ($hAge -lt $FYI_WAKE_MIN) {
     $ht = Get-Content -LiteralPath $h.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if ($ht -and ($ht -match '(?m)^kind:\s*fyi\s*$')) { continue }
   }
+  # Handoff AGENDADO que ainda nao venceu tambem nao acorda ninguem -- mesma razao do fyi.
+  if ($null -eq $ht) { $ht = Get-Content -LiteralPath $h.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue }
+  if ($ht -and ($ht -match '(?m)^not_before_min:\s*(\d+)\s*$') -and ($hAge -lt [double]$matches[1])) { continue }
   $pend[$d] = $true
 }
 Write-Output ('BUS_PENDING=' + (($pend.Keys | Sort-Object) -join ','))

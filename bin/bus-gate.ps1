@@ -337,7 +337,13 @@ try {
     foreach ($c in (Get-ChildItem -LiteralPath $inbox -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.handoff' -and $_.Name -like 'to-*' })) {
       $txt = Get-Content -LiteralPath $c.FullName -Raw -ErrorAction SilentlyContinue
       if (-not ($txt -and ($txt -match '###BUS-END'))) { continue }
-      if (($txt -match '(?m)^kind:\s*fyi\s*$') -and (((Get-Date) - $c.LastWriteTime).TotalMinutes -lt $FYI_WAKE_MIN)) { continue }
+      $ageMin = ((Get-Date) - $c.LastWriteTime).TotalMinutes
+      if (($txt -match '(?m)^kind:\s*fyi\s*$') -and ($ageMin -lt $FYI_WAKE_MIN)) { continue }
+      # not_before_min: handoff AGENDADO -- invisivel ate vencer o prazo (nao e pendencia do
+      # destino nem motivo pra alguem ceder a vez). Mesma mecanica do fyi: prazo contado do
+      # mtime, que nunca muda (handoff e imutavel; mover entre pastas preserva o mtime).
+      # Existe pro self-handoff de ESPERA parar de virar poller de 1 wake por minuto.
+      if (($txt -match '(?m)^not_before_min:\s*(\d+)\s*$') -and ($ageMin -lt [double]$matches[1])) { continue }
       $toSlug = if ($c.Name -match '^to-(.+?)__') { $matches[1] } else { '' }
       if ($toSlug -eq $slug) { $myPending = $true }
       elseif ($toSlug -ne '') {

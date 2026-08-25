@@ -270,7 +270,8 @@
   .column.processing .handoff { border-left-color: var(--amber); }
   .handoff.linkable { cursor: pointer; }
   .cancel-op { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; padding: 0; line-height: 16px; text-align: center; border-radius: 4px; border: 1px solid rgba(248,81,73,0.4); background: rgba(248,81,73,0.12); color: #f85149; font-size: 11px; font-family: inherit; cursor: pointer; opacity: 0.55; z-index: 2; }
-  .cancel-op:hover { opacity: 1; background: rgba(248,81,73,0.28); }
+  .fyi.nb { border-color: rgba(210,153,34,0.5); background: rgba(210,153,34,0.14); color: #d29922; }
+.cancel-op:hover { opacity: 1; background: rgba(248,81,73,0.28); }
   .handoff.hl {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(88,166,255,0.18);
@@ -658,6 +659,7 @@ function handoffCard(it, idSet, proj, cancelable) {
   const tp = (it.toPrio == null ? 1000 : it.toPrio);
   const prioCls = tp < 1000 ? "low" : (tp > 1000 ? "high" : "def");
   const prioArrow = tp < 1000 ? "↓" : (tp > 1000 ? "↑" : "");
+  const nbTag = it.notBeforeLeft > 0 ? `<span class="fyi nb" title="AGENDADO — invisível pro BUS por mais ${it.notBeforeLeft} min: não acorda o destino, não conta como pendência dele e não faz ninguém ceder a vez. Vencido o prazo vira handoff normal. Não está travado — ainda não é pra ser visto.">⏳ ${it.notBeforeLeft}min</span>` : "";
   const fyiTag = it.fyi ? `<span class="fyi" title="FYI — não acorda o destino: entra de carona no próximo wake real dele (ou em 4h, se ele ficar ocioso). Não pede ação nem resposta.">fyi</span>` : "";
   const prioTag = destGhost
     ? `<span class="prio ghost" title="${esc(it.to)} não está registrado no BUS deste projeto — não tem prioridade (a prioridade é do especialista, não do nome)">sem registro</span>`
@@ -668,7 +670,7 @@ function handoffCard(it, idSet, proj, cancelable) {
       <div class="route">
         <span class="from">${esc(it.from)}</span>
         <span class="ar">→</span>
-        <span class="to">${esc(it.to)}</span>${prioTag}${fyiTag}
+        <span class="to">${esc(it.to)}</span>${prioTag}${fyiTag}${nbTag}
       </div>
       <div class="id">${esc(it.id)}</div>
       <div class="tags">${replyTag}${linkTag}${etaTag}</div>
@@ -713,7 +715,7 @@ function specsHtml(specs) {
 // PO/low-prio afunda) e, dentro da mesma prioridade, TEMPO DE ESPERA (mais antigo no topo).
 function sortInboxByWait(items) {
   const p = it => (it.toPrio == null ? 1000 : it.toPrio);
-  const f = it => (it.fyi ? 1 : 0);
+  const f = it => ((it.fyi || it.notBeforeLeft > 0) ? 1 : 0);   // fyi e AGENDADO: nao sao fila de trabalho
   return (items || []).slice().sort((a, b) =>
     (f(a) - f(b)) || (p(b) - p(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }

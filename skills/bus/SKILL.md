@@ -18,7 +18,7 @@ description: Comunicacao assincrona entre sessoes-especialistas do Claude Code v
 |---|---|---|
 | **nome — gravar** | `PS "$ROOT\bin\bus-name.ps1" -Project <p> -Set <slug> [-Priority <0-1000>]` | `bash "$ROOT/bin/bus-name.sh" <p> <slug> [prio]` |
 | **ler inbox** (auto-resolve) | `PS "$ROOT\bin\bus-inbox.ps1" [-Max <n>] [-Protocol]` | `bash "$ROOT/bin/bus-inbox.sh" [--max <n>] [--protocol]` |
-| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <p> [-ReplyRequired] [-Fyi] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <p> [--reply] [--fyi] [--in-reply-to <id>]` |
+| **enviar** | `PS "$ROOT\bin\bus-send.ps1" -To <d> -From <você> -BodyFile <f> -Project <p> [-ReplyRequired] [-Fyi] [-NotBefore <min>] [-InReplyTo <id>]` | `bash "$ROOT/bin/bus-send.sh" --to <d> --from <você> --body-file <f> --project <p> [--reply] [--fyi] [--not-before <min>] [--in-reply-to <id>]` |
 | **liberar lock** | `PS "$ROOT\bin\bus-lock.ps1" -Release` | `bash "$ROOT/bin/bus-lock.sh" --release` |
 
 Base: Windows `%TEMP%\claude-bus`, Unix `/tmp/claude-bus` (override `CLAUDE_BUS_ROOT`); cada projeto é a subpasta `<base>/<projeto>`. **Passe o projeto via `-Project`/`--project`** — **nunca** monte caminho com `%TEMP%`/`$TMPDIR` (quebra conforme o shell).
@@ -99,6 +99,15 @@ Slug/projeto minúsculos, sem espaço.
 - 🔁 **Self-handoff é PONTEIRO, não relatório:** onde está o checkpoint, qual o próximo passo, o que **não** refazer. O conteúdo mora no arquivo de checkpoint — que você vai abrir de qualquer jeito. *(Medido: média de 1.835 B por self-handoff, quase todo ele repetindo um arquivo citado no próprio corpo.)*
 - `BUS_BODY_WARN=` na saída do *enviar* = o corpo passou do razoável. Não desfaz o envio; **corrija no próximo**.
 
+### `--not-before <min>` — esperar sem acordar a cada minuto
+
+Grava `not_before_min: <N>`: o handoff fica **invisível por N minutos** — não acorda o destino, não conta como pendência dele e não faz ninguém ceder a vez por ele. Vencido o prazo, vira handoff normal. O prazo é contado do mtime do arquivo (mesma mecânica do FYI; handoff é imutável e mover entre pastas preserva o mtime). Faixa: **1 a 1440** min — mais que isso é `/bus-schedule`, não handoff parado no inbox.
+
+⏳ **Serve pra ESPERA — e é obrigatório no self-handoff que espera coisa de fora.** CI, deploy, fila de runner, job de outro time: estime quanto a coisa realmente leva e mande **um** self-handoff com esse prazo. Sem ele, o self-handoff acorda no próximo tique (1 min) e você paga um wake completo pra descobrir que nada mudou.
+
+> *Medido em 25/08/2026: **100 self-handoffs num dia** (`acervo` 50, `arquiteto` 35, `qa` 15) — **20 numa única hora**, ~1 wake por minuto esperando uma run de CI de ~8 min. Oito wakes pra descobrir o que um descobriria.*
+
+**Ainda não venceu quando você acordar por outro motivo?** Ele não aparece — e está certo: você acordou pra outra coisa. Não fique conferindo.
 ### `--fyi` — avisar sem acordar
 
 `-Fyi`/`--fyi` grava `kind: fyi`: o handoff **não acorda** o destino. Fica no inbox e é entregue **de carona** no próximo wake real dele — que é exatamente quando a informação ainda serve, porque só acordado ele *faz* alguma coisa. (Se ele ficar ocioso, o FYI acorda sozinho depois de 4h.)

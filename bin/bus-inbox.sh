@@ -224,6 +224,13 @@ for hit in $(ls -tr "$inbox"/to-"$me"__*.handoff 2>/dev/null); do
   # corpo = tudo depois da 1a linha '---', sem a linha ###BUS-END
   body="$(printf '%s\n' "$raw" | sed '1,/^---[[:space:]]*$/d' | sed '/^###BUS-END[[:space:]]*$/d')"
   [ -z "$hrr" ] && hrr="false"
+  # not_before_min: handoff AGENDADO -- nao entrega antes de vencer o prazo. Tem que casar com
+  # a regra do gate (mesmo mtime, mesmo numero), senao o gate acorda e o leitor devolve vazio.
+  nb="$(printf '%s' "$header" | sed -n 's/^not_before_min:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' | tr -d '\r' | head -n1)"
+  if [ -n "$nb" ]; then
+    fmb=$(date -r "$hit" +%s 2>/dev/null || stat -c %Y "$hit" 2>/dev/null || echo 0)
+    [ $(( ($(date +%s) - fmb) / 60 )) -lt "$nb" ] && continue
+  fi
   # Sem 'kind:' = task (handoff antigo, anterior ao fyi -- default seguro: acorda).
   isfyi=0
   printf '%s' "$header" | grep -qE '^kind:[[:space:]]*fyi[[:space:]]*$' && isfyi=1
@@ -283,10 +290,14 @@ for f in "$inbox"/to-*.handoff; do
   [ -e "$f" ] || continue
   bn="$(basename "$f")"; d="${bn#to-}"; d="${d%%__*}"
   case ",$pend," in *",$d,"*) continue;; esac      # ja listado: nao paga leitura de novo
+  fm=$(date -r "$f" +%s 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
+  agemin=$(( (now_s - fm) / 60 ))
   if grep -qE '^kind:[[:space:]]*fyi[[:space:]]*$' "$f" 2>/dev/null; then
-    fm=$(date -r "$f" +%s 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
-    [ $(( (now_s - fm) / 60 )) -lt "$FYI_WAKE_MIN" ] && continue
+    [ "$agemin" -lt "$FYI_WAKE_MIN" ] && continue
   fi
+  # Handoff AGENDADO que ainda nao venceu tambem nao acorda ninguem -- mesma razao do fyi.
+  nbp=$(sed -n 's/^not_before_min:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$f" 2>/dev/null | head -1)
+  [ -n "$nbp" ] && [ "$agemin" -lt "$nbp" ] && continue
   pend="${pend:+$pend,}$d"
 done
 echo "BUS_PENDING=$pend"

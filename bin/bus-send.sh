@@ -4,7 +4,7 @@
 # de auth. NAO TESTADO no Unix ainda -- validar.
 set -u
 base="${CLAUDE_BUS_ROOT:-/tmp/claude-bus}"
-to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""; kind="task"; issue=""
+to=""; from=""; body=""; bodyfile=""; reply="false"; inreply=""; project=""; bus_root=""; kind="task"; issue=""; notbefore="0"
 while [ $# -gt 0 ]; do
   case "$1" in
     --to) to="$2"; shift 2;;
@@ -14,6 +14,7 @@ while [ $# -gt 0 ]; do
     --reply) reply="true"; shift;;
     --fyi) kind="fyi"; shift;;
     --issue) issue="$2"; shift 2;;
+    --not-before) notbefore="$2"; shift 2;;
     --in-reply-to) inreply="$2"; shift 2;;
     --project) project="$2"; shift 2;;
     --bus-root) bus_root="$2"; shift 2;;
@@ -23,6 +24,15 @@ done
 # --fyi: handoff que NAO acorda o destino. Fica no inbox e vai de carona no proximo wake real
 # dele -- que e quando a informacao ainda serve, porque so ai ele vai FAZER alguma coisa.
 # Marcacao: tem algo a FAZER por causa disto? task. E so pra SABER? fyi. Na duvida, task.
+# --not-before <min>: o handoff fica INVISIVEL por N minutos -- nao acorda o destino, nao conta
+# como pendencia dele e nao faz ninguem ceder a vez por ele. Vencido o prazo, vira normal.
+# Existe por causa do self-handoff virando POLLER: medido em 25/08/2026, 100 self-handoffs num
+# dia, 20 numa unica hora -- ~1 wake por minuto esperando uma run de CI de ~8 min.
+case "$notbefore" in (*[!0-9]*) echo "NOT_BEFORE_RANGE: --not-before aceita so inteiro (minutos)." >&2; exit 1;; esac
+if [ "$notbefore" -gt 1440 ]; then
+  echo "NOT_BEFORE_RANGE: --not-before vai de 1 a 1440 minutos (24h). Mais que isso e /bus-schedule." >&2
+  exit 1
+fi
 if [ "$kind" = "fyi" ] && [ "$reply" = "true" ]; then
   echo "FYI_COM_REPLY: --fyi e --reply se contradizem (fyi nao acorda ninguem, a resposta nunca vem). Escolha um." >&2
   exit 1
@@ -65,6 +75,7 @@ tmp="$final.tmp"
   # handoff de volta -- e la que o operador e os usuarios leem, e la fica o historico (o BUS
   # vive no /tmp e esquece). Na pratica quem preenche e o carteiro do /bus-git-watch.
   [ -n "$issue" ] && printf 'issue: %s\n' "$issue"
+  [ "$notbefore" -gt 0 ] && printf 'not_before_min: %s\n' "$notbefore"
   printf 'in_reply_to: %s\n' "$inreply"
   printf -- '---\n'
   printf '%s\n' "$body"
@@ -74,6 +85,7 @@ mv "$tmp" "$final"   # rename atomico no mesmo filesystem
 
 echo "SENT=$final"
 echo "ID=$id"
+[ "$notbefore" -gt 0 ] && echo "NOT_BEFORE=$notbefore min -- invisivel ate la"
 
 # AVISO DE CORPO INFLADO (nao bloqueia -- recusar jogaria fora trabalho ja feito). O valor e o
 # laco de feedback DENTRO da sessao. Medido: self-handoff com 1835 bytes de media cujo corpo

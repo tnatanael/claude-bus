@@ -17,6 +17,7 @@ param(
   [string]$BodyFile = '',
   [switch]$ReplyRequired,
   [switch]$Fyi,
+  [int]$NotBefore = 0,
   [string]$Issue = '',
   [string]$InReplyTo = '',
   [string]$Project = '',
@@ -29,6 +30,16 @@ param(
 # custa atraso). Destravar alguem ("pode pushar") e TASK, nao fyi.
 if ($Fyi -and $ReplyRequired) {
   Write-Error 'FYI_COM_REPLY: -Fyi e -ReplyRequired se contradizem (fyi nao acorda ninguem, entao a resposta nunca vem). Escolha um.'
+  exit 1
+}
+# -NotBefore <min>: o handoff fica INVISIVEL por N minutos -- nao acorda o destino, nao conta
+# como pendencia dele e nao faz ninguem ceder a vez por ele. Vencido o prazo, vira handoff
+# normal. Existe por causa do self-handoff virando POLLER: medido em 25/08/2026, 100
+# self-handoffs num dia (acervo 50, arquiteto 35, qa 15), 20 deles numa unica hora -- ~1 wake
+# por minuto esperando uma run de CI de ~8 min. Espera nao precisa de wake por minuto: mande
+# -NotBefore com o tempo que a coisa realmente leva e pague 1 wake em vez de 8.
+if ($NotBefore -lt 0 -or $NotBefore -gt 1440) {
+  Write-Error 'NOT_BEFORE_RANGE: -NotBefore vai de 1 a 1440 minutos (24h). Espera mais longa que isso e /bus-schedule, nao handoff parado no inbox.'
   exit 1
 }
 # Raiz do projeto resolvida AQUI (-Project), pra o agente nunca montar caminho com
@@ -88,6 +99,7 @@ $lines = @(
   'kind: '           + $kind
 )
 if ($Issue -ne '') { $lines += ('issue: ' + $Issue) }
+if ($NotBefore -gt 0) { $lines += ('not_before_min: ' + $NotBefore) }
 $lines += @(
   'in_reply_to: '    + $InReplyTo
   '---'
@@ -102,6 +114,9 @@ Move-Item -LiteralPath $tmp -Destination $final       # atomic rename on same vo
 
 Write-Output ('SENT=' + $final)
 Write-Output ('ID=' + $id)
+if ($NotBefore -gt 0) {
+  Write-Output ('NOT_BEFORE=' + (Get-Date).AddMinutes($NotBefore).ToString('HH:mm') + ' (' + $NotBefore + ' min -- invisivel ate la)')
+}
 
 # AVISO DE CORPO INFLADO (nao bloqueia -- recusar aqui jogaria fora trabalho ja feito). O valor
 # e o laco de feedback DENTRO da sessao: quem manda 11 self-handoffs seguidos corrige do 2o em

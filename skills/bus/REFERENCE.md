@@ -113,6 +113,32 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## `not_before_min` — handoff agendado, pra espera parar de virar poller (v0.9.27)
+
+**O sintoma.** O operador viu o `rh-proxima/arquiteto` acordando de minuto em minuto com "(tique vazio)", "(tique sem novidade — deploy ainda na fila do runner)", e leu como tique furando o gate. Não era: **existia handoff, dele pra ele mesmo**. Ele estava se auto-alimentando pra continuar acordado esperando o CI. O inbox parecia vazio porque o self-handoff já tinha sido reivindicado pro `processing/`.
+
+**A escala, medida em 25/08/2026:**
+
+| slug | self-handoffs no dia |
+|---|---|
+| `acervo` | 50 |
+| `arquiteto` (rh) | 35 — **20 numa única hora** |
+| `qa` | 15 |
+| **total** | **100** |
+
+Vinte numa hora é ~1 por minuto. Corpo médio de 721 B, então não é o payload: **cada um é um wake completo**. Uma run de CI leva ~8 min; ele pagava 8 wakes pra descobrir o que 1 descobriria.
+
+**Por que doutrina não resolvia sozinha.** O self-handoff é sancionado ("tarefa longa que não fecha num wake precisa de self-handoff") e a SKILL só falava do *corpo* (ponteiro, não relatório) — nada sobre **cadência**. E mandar "espace as checagens" não funciona: o self-handoff acorda no próximo tique, então o agente pode escrever "não reabrir antes das 11:52", mas **já acordou pra ler isso** — o wake já foi pago. Esperar em foreground custaria zero wake mas mata o tique pelos 8 min e contradiz o `0d`.
+
+**A solução, e por que ela é barata.** Cabeçalho `not_before_min: <N>` — o handoff fica invisível por N minutos: não acorda o destino, não conta como pendência dele, não faz ninguém ceder a vez por ele. Vencido, vira handoff normal.
+
+O prazo conta do **mtime do arquivo**, que é exatamente o mecanismo que o `FYI_WAKE_MIN` já usava. Isso foi decisão de projeto, não preguiça: um `not-before` com timestamp ISO exigiria parsing de data em `sh`, onde `date -d` é GNU e o BSD do macOS quer `-j -f` — divergência garantida entre os espelhos. Com minutos relativos, os quatro scripts comparam inteiros. E o mtime é estável: handoff é imutável e mover entre pastas preserva o mtime.
+
+**Onde entrou:** `bus-send` (`-NotBefore`/`--not-before`, faixa 1–1440), o gate (varredura de pendência: nem `myPending` nem `higherPending`) e o `bus-inbox` (entrega **e** `BUS_PENDING`). Os dois números têm que casar nos dois arquivos, senão o gate acorda e o leitor devolve vazio — o mesmo pareamento que o fyi já exigia.
+
+**Bug pego pelo teste de ponta a ponta, e vale a lição:** no `bus-inbox.sh` a variável do laço de entrega é `$hit`, não `$f` (os outros dois laços usam `$f`). Escrevi `date -r "$f"`, que falhava, caía no `|| echo 0` e dava idade enorme — **o handoff agendado era entregue na hora**. Sintaxe passava, `bash -n` passava, e só o teste funcional pegou. Fallback silencioso (`|| echo 0`) transforma erro de variável em resultado plausível.
+
+**No dashboard:** `notBeforeLeft` no payload e a tag `⏳ Nmin` no card, e o agendado **afunda na ordenação junto com o fyi** — nenhum dos dois é fila de trabalho. Sem isso o card apareceria "na fila há 40 min" como se estivesse travado, quando ele ainda nem existe pra quem o receberia.
 ## Caso confirmado: 15 tarefas fantasma matando o tique (v0.9.25)
 
 Segunda confirmação independente do passo `0d`, e mais forte que a primeira (o monitor do `git-watch`, v0.9.18). Em 25/08/2026 o `cl-adv/arquiteto` parou de receber handoffs. Diagnóstico de fora, sem tocar na sessão:

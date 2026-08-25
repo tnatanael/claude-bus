@@ -81,6 +81,16 @@ function safeReaddir(dir) {
   }
 }
 
+// mtime em ms, ou null. O prazo do not_before_min conta do mtime do arquivo -- o mesmo
+// relogio que o gate e o bus-inbox usam, senao o painel mostraria um numero que nao bate.
+function safeStatMtime(file) {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch (_) {
+    return null;
+  }
+}
+
 function safeReadText(file) {
   try {
     return fs.readFileSync(file, 'utf8');
@@ -136,6 +146,15 @@ function readHandoffs(folder, root) {
       // kind ausente = task (handoff anterior ao fyi). fyi NAO acorda o destino: fica no inbox
       // ate ele acordar por outro motivo. Sem marca propria, o card pareceria parado sem razao.
       fyi: String(header.kind).toLowerCase() === 'fyi',
+      // not_before_min: handoff AGENDADO -- invisivel pro gate e pro leitor ate vencer o prazo.
+      // Sem isto o card apareceria "na fila ha 40 min" como se estivesse travado, quando na
+      // verdade ele ainda nem existe pra quem o receberia. notBeforeLeft = min que faltam.
+      notBeforeLeft: (() => {
+        const n = parseInt(header.not_before_min, 10);
+        if (!Number.isFinite(n) || n <= 0) return 0;
+        const age = (Date.now() - (safeStatMtime(path.join(dir, f)) || Date.now())) / 60000;
+        return age < n ? Math.max(1, Math.ceil(n - age)) : 0;
+      })(),
       inReplyTo: header.in_reply_to || '',
     });
   }
