@@ -15,7 +15,9 @@ description: DESTRAVA esta sessao e re-arma o cron de auto-recheck do BUS dela �
 
 Este comando costuma chegar porque **alguém notou que você sumiu do BUS** (o dashboard mostra o `seen` congelado, ou um par te cutucou por `SendMessage`). Antes de re-armar, varra as cinco coisas que impedem o tique de chegar ou de virar trabalho. Todas são verificáveis por você, sozinho, em segundos:
 
-1. ⏱️ **Tarefa pendurada — a mais comum.** O tique só entra em sessão **ociosa**: enquanto um comando roda em foreground, ou uma tarefa de fundo continua viva, o cron **não dispara** e você some do BUS sem erro nenhum. Olhe suas tarefas em segundo plano e **encerre o que não for essencial** (`TaskStop`). Daqui pra frente: **timeout explícito** em tudo que sai da máquina (`ssh`, `gh`, `curl`, suíte, deploy); nada de laço `for`+`sleep` nem espera sem prazo.
+1. ⏱️ **Tarefa pendurada — a causa nº 1, e ela se ACUMULA.** O tique só entra em sessão **ociosa**: enquanto um comando roda em foreground, ou **uma** tarefa de fundo continua viva, o cron **não dispara** e você some do BUS sem erro nenhum. Repare: isso **não** te impede de trabalhar — você segue respondendo ao operador, produzindo, verde no dashboard — só o tique não chega. É o pior modo de falha daqui.
+   **LISTE suas tarefas em segundo plano e pare TODAS com `TaskStop`. Todas mesmo, sem triagem** — inclusive as que parecem inofensivas ou já concluídas. Não escolha quais manter: se você está travado, você é justamente quem não consegue julgar isso. *(Caso real de 25/08/2026, `cl-adv/arquiteto`: **15** tarefas vivas acumuladas ao longo do dia, 72 min de zero tique com 7 handoffs esperando no inbox. Matou as 15 → `acquire` em minutos. Vários `.output` de **0 KB** na pasta de tasks são a assinatura: disparou, nunca produziu nada, nunca terminou.)*
+   Daqui pra frente: **timeout explícito** em tudo que sai da máquina (`ssh`, `gh`, `curl`, suíte, deploy); nada de laço `for`+`sleep` nem espera sem prazo. E **nunca encerre um wake deixando tarefa disparada que você não vai fechar** — é assim que se chega a 15.
 2. 🪪 **Identidade órfã.** O passo 1 devolveu `NONE`? Seu **sid mudou** (`/clear`, restart) e `names/` ainda aponta pra encarnação anterior — você não tem cron e **nunca mais vai gatear**. `/bus-reload` **não resolve isso**: rode **`/bus <projeto> <slug>`**, que re-registra o sid vivo, evicta o antigo e re-arma. ⚠️ O teste é **este passo devolver `NONE`** — não o estado do `seen/`, que é escrito também por `bus-inbox` e `bus-name` e portanto não mede o tique.
 3. 🔒 **Lock órfão em seu próprio nome.** Uma encarnação anterior sua pode ter morrido segurando o slot — o projeto inteiro defere até o lease vencer. Libere (`bus-lock -Release`); um lock em nome do **seu** slug só pode ser seu.
 4. ⏸️ **Projeto pausado** (`<projroot>/.bus-paused`): o tique chega e defere, por desenho. Você não tira isso — só o dashboard. **Reporte ao operador** e pare.
@@ -35,4 +37,10 @@ Achou algo nos itens 2 ou 4? **Pare e faça o que a linha manda** — re-armar p
 
 ### 3. Encerre
 
-**NÃO** processe o inbox e **NÃO** mexa no lock — exceto o órfão em seu próprio nome, que o passo 0 já mandou liberar. Reporte **"cron re-armado — slug=X, projeto=Y"**. O auto-recheck (bare `/bus` a cada `<N>` min) volta a rodar e o dashboard mostra o especialista armado.
+**NÃO** processe o inbox e **NÃO** mexa no lock — exceto o órfão em seu próprio nome, que o passo 0 já mandou liberar. Reporte **"cron re-armado — slug=X, projeto=Y"**, e diga **quantas tarefas de fundo existiam e quantas você parou**.
+
+### 4. FIQUE PARADO ~2 min — e não confira
+
+Depois de re-armar, **não rode comando nenhum**: nem `bus-name`, nem `bus-inbox`, nem "só pra ver se voltou". `seen/<sid>` é escrito por **três** caminhos (`bus-gate`, `bus-inbox`, `bus-name`), então **o ato de conferir escreve o dado que a conferência ia ler** — foi assim que este mesmo incidente produziu quatro diagnósticos errados num dia.
+
+Quem confere é quem está de fora, pelo `.bus-gate.log`: **com o seu inbox NÃO-vazio e bem formado, todo caminho do gate grava linha** (`acquire` ou `defer-*`), então zero linha ali prova que o tique não chegou. Se o inbox estiver vazio o gate sai calado e o log não prova nada — a medição só vale com pendência real.

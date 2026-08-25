@@ -113,6 +113,35 @@ Lição geral: **num sistema de tique, "há recurso livre agora" não é "haver�
 - o lock protegia, sem ninguém pedir, contra **dois especialistas rodando `git` no mesmo repo**. Com N>1 isso acaba. Em projetos onde cada um tem sua subpasta o risco é menor; quem circula pela árvore inteira (arquiteto) é o caso a vigiar.
 - **cada slot é uma sessão do Claude trabalhando**. Nesta máquina foi medido 94,7% de RAM e 100% de CPU com uma frota ociosa e um `vitest` rodando. Subir de 1 para 2 e observar é o caminho; 3 é teto, não meta.
 
+## Caso confirmado: 15 tarefas fantasma matando o tique (v0.9.25)
+
+Segunda confirmação independente do passo `0d`, e mais forte que a primeira (o monitor do `git-watch`, v0.9.18). Em 25/08/2026 o `cl-adv/arquiteto` parou de receber handoffs. Diagnóstico de fora, sem tocar na sessão:
+
+| sinal | valor |
+|---|---|
+| execuções do gate dele, em 72 min | **0** |
+| execuções das 8 sessões vizinhas, mesma janela | 17 a 65 cada |
+| handoffs no inbox dele, todos com `###BUS-END` | 7 (o mais velho, 82 min) |
+| transcript | congelado há 13 min → **ociosa** |
+| `/bus-reload` | feito **certo** às 10:22 (`CronList`→`CronDelete`→`CronCreate`→`CronList`) |
+
+Com pendência real e bem formada, **todo** tique teria que gravar `acquire` ou `defer-*`. Zero linhas ⇒ o cron não estava disparando. E não era registro órfão (ela estava em `names/`), não era defer (defer grava linha), não era inbox vazia.
+
+**Causa: 15 tarefas de fundo ainda vivas**, acumuladas ao longo do dia. Ela matou todas; o `acquire` apareceu em minutos e ela drenou o inbox.
+
+### O que 15 ensina que 1 não ensinava
+
+**Tarefa de fundo pendurada não impede a sessão de trabalhar — impede o agendador de disparar.** Ela respondeu ao operador o tempo todo, produziu 3,4 MB de transcript, apareceu **verde no dashboard** — e estava morta pro BUS havia horas. É o pior modo de falha daqui: nenhum erro, nenhum log, nenhum sintoma na tela.
+
+E o problema **se acumula**. Não é uma tarefa que trava tudo: é o resíduo de um dia inteiro de trabalho, cada wake deixando mais uma pra trás. Quem encerra o wake com tarefa disparada e nunca mais olha vai colecionando — até que a sessão simplesmente some. Vários `.output` de **0 KB** na pasta de tasks são a assinatura: disparou, nunca produziu nada, nunca terminou.
+
+⚠️ **De fora não dá pra distinguir "pendurada" de "terminou sem escrever"** — o mtime é igual nos dois casos. Só a própria sessão vê o painel dela. Por isso o item 1 do passo 0 do `/bus-reload` manda **parar TODAS**, sem triagem: quem está travado não tem como julgar o que é seguro manter.
+
+### O protocolo de medição que funcionou
+
+Vale reusar, porque foi o único instrumento válido do incidente inteiro: **com inbox NÃO-vazia e bem formada, o `.bus-gate.log` é prova de vida do tique** — nesse estado, todo caminho do gate grava linha. É só nesse estado. Com inbox vazia ele sai calado, e aí o log não prova nada (foi o que produziu quatro diagnósticos errados no mesmo dia — ver seção acima).
+
+E a sessão sob suspeita tem que **ficar parada** durante a medição, sem rodar `bus-name` nem `bus-inbox` "pra conferir": `seen/<sid>` tem três escritores e o ato de conferir escreve o dado que a conferência ia ler.
 ## `seen/<sid>` não mede o tique — e o dashboard herda o erro (v0.9.24)
 
 Em 25/08/2026, investigando por que um especialista sumia do BUS, eu afirmei que `seen/<sid>` é a prova incondicional de que **o gate rodou** — citando `bus-gate.ps1:214`, que grava antes de qualquer decisão. **A linha está certa e a inferência estava errada.** `seen/<sid>` tem **três escritores**:
